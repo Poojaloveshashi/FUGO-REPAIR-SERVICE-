@@ -1,0 +1,9 @@
+{
+  "name": "FUGO REPAIR AND SERVICE MAN",
+  "description": "Professional vehicle repair ecosystem featuring warehouse logistics, part sourcing, and multi-channel service management.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}

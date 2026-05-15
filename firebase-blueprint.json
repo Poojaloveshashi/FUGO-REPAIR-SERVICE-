@@ -1,0 +1,147 @@
+{
+  "entities": {
+    "RepairRequest": {
+      "title": "Repair Request",
+      "description": "A request for vehicle repair or service.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who requested the repair." },
+        "vehicleName": { "type": "string", "description": "Make and model of the vehicle. (e.g. Toyota Camry)" },
+        "vehiclePlate": { "type": "string", "description": "License plate of the vehicle." },
+        "rcNumber": { "type": "string", "description": "Registration Certificate number." },
+        "make": { "type": "string", "description": "Vehicle manufacturer." },
+        "model": { "type": "string", "description": "Vehicle model." },
+        "year": { "type": "string", "description": "Manufacturing year." },
+        "fuelType": { "type": "string", "description": "Type of fuel used." },
+        "engineCapacity": { "type": "string", "description": "Engine displacement." },
+        "registrationDate": { "type": "string", "description": "Date of initial registration." },
+        "description": { "type": "string", "description": "Detailed description of the issue." },
+        "status": { "type": "string", "enum": ["pending", "transporting", "warehouse", "repairing", "ready", "completed"], "description": "Current status of the repair." },
+        "serviceType": { "type": "string", "enum": ["online", "offline"], "description": "Online (mobile repair) or Offline (warehouse repair)." },
+        "partPreference": { "type": "string", "enum": ["brand", "third-party"], "description": "Preference for brand name or third-party parts." },
+        "location": { "type": "string", "description": "Pickup or service location coordinates or address." },
+        "photoUrl": { "type": "string", "description": "Initial photo of the vehicle/issue." },
+        "price": { "type": "number", "description": "Total final price." },
+        "servicePrice": { "type": "number", "description": "Labor/service cost." },
+        "repairPrice": { "type": "number", "description": "Cost of the actual repair work." },
+        "oemPrice": { "type": "number", "description": "Total estimate using OEM parts." },
+        "thirdPartyPrice": { "type": "number", "description": "Total estimate using 3rd Party parts." },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "price": { "type": "number" },
+              "sourcing": { "type": "string", "enum": ["brand", "third-party"], "description": "Sourcing for this specific part." }
+            }
+          },
+          "description": "List of parts used and their prices."
+        },
+        "repairComplexity": { "type": "string", "enum": ["light", "heavy"], "description": "Technician assessment of repair difficulty." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "vehicleName", "status", "serviceType", "partPreference", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Extended user information.",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "rank": { "type": "string" },
+        "headline": { "type": "string" },
+        "aboutMe": { "type": "string" },
+        "expertise": { "type": "array", "items": { "type": "string" } },
+        "certifications": { "type": "array", "items": { "type": "string" } },
+        "bioStatus": { "type": "string" },
+        "serviceGuarantee": { "type": "string" },
+        "isVerified": { "type": "boolean" },
+        "isInsured": { "type": "boolean" },
+        "liabilityAmount": { "type": "string" },
+        "licenseNumber": { "type": "string" },
+        "serviceNotes": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "technician", "admin"] },
+        "earnings": { "type": "number", "description": "Total earnings of the technician." }
+      }
+    },
+    "Slot": {
+      "title": "Service Slot",
+      "description": "Available work shifts for technicians.",
+      "type": "object",
+      "properties": {
+        "locationName": { "type": "string", "description": "Name of the service center or location." },
+        "address": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "earningsPotential": { "type": "number", "description": "Potential earnings for this slot." },
+        "availablePositions": { "type": "number" },
+        "distance": { "type": "number", "description": "Distance from technician in KM." }
+      }
+    },
+    "Booking": {
+      "title": "Slot Booking",
+      "description": "A technician's booking of a work slot.",
+      "type": "object",
+      "properties": {
+        "technicianId": { "type": "string" },
+        "slotId": { "type": "string" },
+        "status": { "type": "string", "enum": ["booked", "completed", "cancelled"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Earning": {
+      "title": "Earning Record",
+      "description": "Record of earnings for a technician.",
+      "type": "object",
+      "properties": {
+        "technicianId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["payout", "bonus", "referral"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" }
+      }
+    },
+    "RepairLog": {
+      "title": "Repair Log",
+      "description": "Status updates for a specific repair request.",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "status": { "type": "string" },
+        "message": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/repair_requests/{requestId}": {
+      "schema": "RepairRequest",
+      "description": "Collection of repair requests."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents."
+    },
+    "/repair_requests/{requestId}/logs/{logId}": {
+      "schema": "RepairLog",
+      "description": "Status history for a repair."
+    },
+    "/slots/{slotId}": {
+      "schema": "Slot",
+      "description": "Available service slots."
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Technician bookings."
+    },
+    "/earnings/{earningId}": {
+      "schema": "Earning",
+      "description": "Earning records."
+    }
+  }
+}

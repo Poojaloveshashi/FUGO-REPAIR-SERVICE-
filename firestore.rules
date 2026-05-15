@@ -1,0 +1,171 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isTechnician() {
+      return isSignedIn() && getUserData(request.auth.uid).role == 'technician';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && getUserData(request.auth.uid).role == 'admin';
+    }
+
+    // Validation Helpers
+    function isValidRepairRequest(data) {
+      return data.userId == request.auth.uid 
+        && data.rcNumber is string && data.rcNumber.size() <= 50
+        && data.status in ['pending', 'transporting', 'warehouse', 'repairing', 'ready', 'completed']
+        && data.serviceType in ['online', 'offline']
+        && data.partPreference in ['brand', 'third-party']
+        && (!('customerName' in data) || (data.customerName is string && data.customerName.size() <= 200))
+        && (!('customerPhone' in data) || (data.customerPhone is string && data.customerPhone.size() <= 100))
+        && (!('vehicleName' in data) || (data.vehicleName is string && data.vehicleName.size() <= 200))
+        && (!('vehiclePlate' in data) || (data.vehiclePlate is string && data.vehiclePlate.size() <= 100))
+        && (!('make' in data) || (data.make is string && data.make.size() <= 100))
+        && (!('model' in data) || (data.model is string && data.model.size() <= 100))
+        && (!('year' in data) || (data.year is string && data.year.size() <= 50))
+        && (!('fuelType' in data) || (data.fuelType is string && data.fuelType.size() <= 100))
+        && (!('engineCapacity' in data) || (data.engineCapacity is string && data.engineCapacity.size() <= 100))
+        && (!('registrationDate' in data) || (data.registrationDate is string && data.registrationDate.size() <= 100))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 5000))
+        && (!('estimatedTiming' in data) || (data.estimatedTiming is string && data.estimatedTiming.size() <= 200))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2000000))
+        && (!('parts' in data) || (data.parts is list && data.parts.size() <= 100))
+        && (!('repairComplexity' in data) || (data.repairComplexity is string && data.repairComplexity.size() <= 100))
+        && (!('price' in data) || (data.price is string && data.price.size() <= 50))
+        && (!('repairStartTime' in data) || (data.repairStartTime is timestamp || data.repairStartTime == null))
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.displayName is string && data.displayName.size() <= 100
+        && data.email == request.auth.token.email
+        && data.role in ['customer', 'technician', 'admin']
+        && (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 30))
+        && (!('rank' in data) || (data.rank is string && data.rank.size() <= 100))
+        && (!('headline' in data) || (data.headline is string && data.headline.size() <= 200))
+        && (!('aboutMe' in data) || (data.aboutMe is string && data.aboutMe.size() <= 2000))
+        && (!('expertise' in data) || (data.expertise is list && data.expertise.size() <= 20))
+        && (!('certifications' in data) || (data.certifications is list && data.certifications.size() <= 20))
+        && (!('bioStatus' in data) || (data.bioStatus is string && data.bioStatus.size() <= 100))
+        && (!('serviceGuarantee' in data) || (data.serviceGuarantee is string && data.serviceGuarantee.size() <= 500))
+        && (!('isVerified' in data) || data.isVerified is bool)
+        && (!('isInsured' in data) || data.isInsured is bool)
+        && (!('liabilityAmount' in data) || (data.liabilityAmount is string && data.liabilityAmount.size() <= 50))
+        && (!('licenseNumber' in data) || (data.licenseNumber is string && data.licenseNumber.size() <= 50))
+        && (!('serviceNotes' in data) || (data.serviceNotes is string && data.serviceNotes.size() <= 500));
+    }
+
+    function isValidSlot(data) {
+      return data.locationName is string && data.locationName.size() <= 200
+        && data.address is string && data.address.size() <= 500
+        && data.startTime is timestamp && data.endTime is timestamp
+        && data.earningsPotential is number && data.availablePositions is number;
+    }
+
+    function isValidBooking(data) {
+      return data.technicianId == request.auth.uid
+        && isValidId(data.slotId)
+        && data.status in ['booked', 'completed', 'cancelled']
+        && data.timestamp == request.time;
+    }
+
+    function isValidEarning(data) {
+      return data.technicianId == request.auth.uid
+        && data.amount is number
+        && data.type in ['payout', 'bonus', 'referral']
+        && data.timestamp == request.time;
+    }
+
+    // Collections
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isTechnician() || isAdmin());
+      allow create: if isSignedIn() && isOwner(userId) && isValidUserProfile(incoming());
+      allow update: if isSignedIn() && isOwner(userId) 
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phoneNumber', 'rank', 'headline', 'aboutMe', 'expertise', 'certifications', 'bioStatus', 'serviceGuarantee', 'isVerified', 'isInsured', 'liabilityAmount', 'licenseNumber', 'serviceNotes'])
+        && isValidUserProfile(incoming());
+    }
+
+    match /repair_requests/{requestId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isTechnician() || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isTechnician() || isAdmin());
+      
+      allow create: if isSignedIn() && isValidId(requestId) && isValidRepairRequest(incoming());
+      
+      allow update: if isSignedIn() && (
+        // Action: Customer updates description or photos while pending
+        (existing().userId == request.auth.uid && existing().status == 'pending' 
+         && incoming().diff(existing()).affectedKeys().hasOnly(['description', 'photoUrl', 'updatedAt'])
+         && incoming().updatedAt == request.time) ||
+        
+        // Action: Technician updates status, price, complexity, parts, or service prices
+        ((isTechnician() || isAdmin()) && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'price', 'repairComplexity', 'parts', 'servicePrice', 'repairPrice', 'oemPrice', 'thirdPartyPrice', 'repairStartTime'])
+         && incoming().updatedAt == request.time)
+      );
+    }
+
+    match /repair_requests/{requestId}/logs/{logId} {
+      function canAccessParent() {
+        return get(/databases/$(database)/documents/repair_requests/$(requestId)).data.userId == request.auth.uid 
+               || isTechnician() || isAdmin();
+      }
+
+      allow read: if isSignedIn() && canAccessParent();
+      allow create: if isSignedIn() && (isTechnician() || isAdmin()) && isValidId(logId)
+        && incoming().requestId == requestId
+        && incoming().timestamp == request.time;
+    }
+
+    match /slots/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isSignedIn() && (resource.data.technicianId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(bookingId) && isValidBooking(incoming());
+      allow update: if isSignedIn() && resource.data.technicianId == request.auth.uid 
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'timestamp'])
+        && isValidBooking(incoming());
+    }
+
+    match /earnings/{earningId} {
+      allow read: if isSignedIn() && (resource.data.technicianId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+  }
+}
