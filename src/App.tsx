@@ -138,12 +138,68 @@ export default function App() {
   const [view, setView] = useState<AppView>('home');
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [selectedSlots, setSelectedSlots] = useState<any[]>([]);
+  const [isShiftStarted, setIsShiftStarted] = useState(false);
 
   const [bookedSlots, setBookedSlots] = useState<any[]>([]);
   const [viewingDoc, setViewingDoc] = useState<string | null>(null);
 
   const [requests, setRequests] = useState<RepairRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<RepairRequest | null>(null);
+  
+  // Seed initial mock data for analysis
+  useEffect(() => {
+    if (requests.length === 0 && profile?.role === 'technician') {
+      const mockRequests: RepairRequest[] = [
+        {
+          id: 'REQ-DEMO-001',
+          userId: 'demo-user',
+          customerName: 'Rahul Sharma',
+          customerPhone: '9876543210',
+          vehicleName: 'Mahindra XUV700',
+          rcNumber: 'TS07HE1234',
+          vehiclePlate: 'TS 07 HE 1234',
+          make: 'Mahindra',
+          model: 'XUV700',
+          year: '2023',
+          fuelType: 'Diesel',
+          description: 'Engine making rattling noise and brake pads feel soft.',
+          status: 'repairing',
+          serviceType: 'offline',
+          partPreference: 'brand',
+          price: 4500,
+          repairPrice: 1500,
+          servicePrice: 500,
+          parts: [
+            { name: 'Brake Pads (Front)', price: 2500, sourcing: 'brand' }
+          ],
+          repairStartTime: new Date(Date.now() - 3600000), // Started 1 hour ago
+          createdAt: new Date(Date.now() - 86400000), // Created yesterday
+          updatedAt: new Date()
+        },
+        {
+          id: 'REQ-DEMO-002',
+          userId: 'demo-user',
+          customerName: 'Priya Reddy',
+          customerPhone: '9123456789',
+          vehicleName: 'Tata Nexon EV',
+          rcNumber: 'TS08JK5678',
+          vehiclePlate: 'TS 08 JK 5678',
+          make: 'Tata',
+          model: 'Nexon EV',
+          year: '2022',
+          fuelType: 'Electric',
+          description: 'Software update required and minor scratch on left door.',
+          status: 'pending',
+          serviceType: 'online',
+          partPreference: 'third-party',
+          createdAt: new Date(Date.now() - 172800000), // Created 2 days ago
+          updatedAt: new Date()
+        }
+      ];
+      setRequests(mockRequests);
+    }
+  }, [profile, requests.length]);
+
   const [slots, setSlots] = useState<any[]>([]); // To be populated
   const [earnings, setEarnings] = useState<any[]>([]); // To be populated
 
@@ -261,7 +317,9 @@ export default function App() {
         </div>
 
         <NavItem icon={LayoutDashboard} label="Home" active={view === 'home'} onClick={() => setView('home')} />
-        <NavItem icon={Wrench} label="Repair Logbook" active={view === 'repairs'} onClick={() => setView('repairs')} />
+        {isShiftStarted && (
+          <NavItem icon={Wrench} label="Repair Logbook" active={view === 'repairs'} onClick={() => setView('repairs')} />
+        )}
         <NavItem icon={Clock} label="Slots" active={view === 'slots'} onClick={() => setView('slots')} />
         <NavItem icon={UserIcon} label="Profile" active={view === 'profile'} onClick={() => setView('profile')} />
         
@@ -307,6 +365,8 @@ export default function App() {
                 bookedSlots={bookedSlots}
                 onStartJob={() => setView('booking')}
                 onOpenLogbook={() => setView('repairs')}
+                isShiftStarted={isShiftStarted}
+                onStartShift={() => setIsShiftStarted(true)}
               />
             )}
             {view === 'slots' && (
@@ -714,8 +774,10 @@ const HomeView: React.FC<{
   onBook: () => void, 
   bookedSlots?: any[], 
   onStartJob: () => void,
-  onOpenLogbook: () => void
-}> = ({ profile, requests, onSelectRequest, onBook, bookedSlots = [], onStartJob, onOpenLogbook }) => {
+  onOpenLogbook: () => void,
+  isShiftStarted: boolean,
+  onStartShift: () => void
+}> = ({ profile, requests, onSelectRequest, onBook, bookedSlots = [], onStartJob, onOpenLogbook, isShiftStarted, onStartShift }) => {
   const activeShift = bookedSlots.length > 0 ? bookedSlots[bookedSlots.length - 1] : null;
   const [earningsTab, setEarningsTab] = useState<'today' | 'week'>('today');
 
@@ -734,7 +796,7 @@ const HomeView: React.FC<{
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h4 className="text-xl font-black uppercase tracking-tight">HYD-NALLAGANDLA NEW</h4>
+              <h4 className="text-xl font-black uppercase tracking-tight">{activeShift?.address || 'HYD-NALLAGANDLA NEW'}</h4>
               <ChevronRight className="w-4 h-4 rotate-90 opacity-20" />
             </div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">
@@ -750,26 +812,68 @@ const HomeView: React.FC<{
 
       {/* Active Shift Banner */}
       {activeShift && (
-        <div className="mx-6 p-6 bg-white rounded-3xl border border-slate-100 shadow-sm">
+        <div className="mx-6 p-6 bg-white rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden">
+          {isShiftStarted && (
+            <div className="absolute top-0 right-0 px-4 py-1 bg-green-500 text-white text-[10px] font-black uppercase tracking-widest rounded-bl-xl">
+              Live Now
+            </div>
+          )}
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-3xl font-black">{activeShift.time || '05:01 PM'} - 07:00 PM</h3>
-            <span className="bg-purple-50 text-purple-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Upcoming</span>
+            <span className={cn(
+              "px-3 py-1 rounded-full text-xs font-bold uppercase",
+              isShiftStarted ? "bg-green-100 text-green-600" : "bg-purple-50 text-purple-600"
+            )}>
+              {isShiftStarted ? 'Active Shift' : 'Upcoming'}
+            </span>
           </div>
           
           <div className="flex gap-4 items-start bg-slate-50 p-4 rounded-2xl mb-4">
-            <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center">
-              <Clock className="w-6 h-6 text-slate-500" />
+            <div className={cn(
+              "w-12 h-12 rounded-full flex items-center justify-center",
+              isShiftStarted ? "bg-green-100" : "bg-slate-200"
+            )}>
+              <Clock className={cn("w-6 h-6", isShiftStarted ? "text-green-600" : "text-slate-500")} />
             </div>
             <div>
-              <h5 className="font-bold">Shift starts at {activeShift.time || '05:01 PM'}</h5>
-              <p className="text-sm text-slate-400 font-medium">Reach your Store before shift start time</p>
+              <h5 className="font-bold">
+                {isShiftStarted ? 'Shift In Progress' : `Shift starts at ${activeShift.time || '05:01 PM'}`}
+              </h5>
+              <p className="text-sm text-slate-400 font-medium">
+                {isShiftStarted ? 'Good luck with your assignments!' : 'Reach your Store before shift start time'}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-slate-500">
-            <Info className="w-5 h-5 flex-shrink-0" />
-            <p className="text-sm font-medium">Please reach your store before slot start time.</p>
-          </div>
+          {!isShiftStarted ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 text-slate-500">
+                <Info className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm font-medium">Please reach your store before slot start time.</p>
+              </div>
+              <button 
+                onClick={onStartShift}
+                className="w-full bg-fugo py-4 rounded-2xl text-lg font-black text-white hover:bg-fugo-accent transition-colors flex items-center justify-center gap-2"
+              >
+                Start Shift <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={onOpenLogbook}
+                className="bg-black text-white py-4 rounded-2xl text-sm font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Wrench className="w-4 h-4" /> Logbook
+              </button>
+              <button 
+                onClick={onStartJob}
+                className="bg-fugo text-white py-4 rounded-2xl text-sm font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Start Job
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -856,23 +960,30 @@ const HomeView: React.FC<{
 }
 
 const SlotsView: React.FC<{ onBack: () => void, onBook: (slot: any) => void }> = ({ onBack, onBook }) => {
-  const [selectedDate, setSelectedDate] = useState('16');
-  const dates = [
-    { day: 'Mon', date: '11' },
-    { day: 'Tue', date: '12' },
-    { day: 'Wed', date: '13' },
-    { day: 'Thu', date: '14' },
-    { day: 'Fri', date: '15' },
-    { day: 'Sat', date: '16' },
-  ];
+  const currentDate = new Date();
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  
+  const dates = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date();
+    d.setDate(currentDate.getDate() + i);
+    return {
+      day: dayNames[d.getDay()],
+      date: String(d.getDate()).padStart(2, '0'),
+      fullDate: d
+    };
+  });
+
+  const [selectedDate, setSelectedDate] = useState(dates[0].date);
 
   const slots = [
-    { time: '02:01pm – 03:00pm', earning: 'Earn upto ₹100', positions: 29, address: 'HYD-NALLAGANDLA NEW' },
-    { time: '03:01pm – 05:00pm', earning: 'Earn upto ₹200', positions: 28, address: 'HYD-NALLAGANDLA NEW' },
-    { time: '12:01pm – 02:00pm', earning: 'Earn upto ₹200', positions: 28, address: 'HYD-NALLAGANDLA NEW' },
-    { time: '07:01pm – 09:00pm', earning: 'Earn upto ₹400', positions: 27, address: 'HYD-NALLAGANDLA NEW' },
-    { time: '05:01pm – 07:00pm', earning: 'Earn upto ₹400', positions: 27, address: 'HYD-NALLAGANDLA NEW' },
-    { time: '09:01pm – 11:00pm', earning: 'Earn upto ₹500', positions: 27, address: 'HYD-NALLAGANDLA NEW' },
+    { time: '08:00am – 10:00am', earning: 'Earn upto ₹350', positions: 12, address: 'DLF Cyber City, Gachibowli' },
+    { time: '10:01am – 12:00pm', earning: 'Earn upto ₹400', positions: 8, address: 'Financial District, Gachibowli' },
+    { time: '12:01pm – 02:00pm', earning: 'Earn upto ₹300', positions: 15, address: 'Mindspace IT Park, Gachibowli' },
+    { time: '02:01pm – 04:00pm', earning: 'Earn upto ₹300', positions: 20, address: 'Gachibowli Stadium Road' },
+    { time: '04:01pm – 06:00pm', earning: 'Earn upto ₹450', positions: 5, address: 'IIIT Junction Hub, Gachibowli' },
+    { time: '06:01pm – 08:00pm', earning: 'Earn upto ₹500', positions: 2, address: 'Gachibowli Central Mall Point' },
+    { time: '08:01pm – 10:00pm', earning: 'Earn upto ₹600', positions: 4, address: 'Wipro Circle Plaza, Gachibowli' },
+    { time: '10:01pm – 12:00am', earning: 'Earn upto ₹700', positions: 10, address: 'ORR Exit Station, Gachibowli' },
   ];
 
   const [toggled, setToggled] = useState<Record<number, boolean>>({});
@@ -957,7 +1068,11 @@ const SlotsView: React.FC<{ onBack: () => void, onBook: (slot: any) => void }> =
                      {slot.positions} Free
                    </span>
                 </div>
-                <p className="text-purple-600 font-bold underline decoration-2 underline-offset-4">{slot.earning}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-purple-600 font-bold underline decoration-2 underline-offset-4">{slot.earning}</p>
+                  <span className="text-slate-300">•</span>
+                  <p className="text-sm text-slate-400 font-bold uppercase tracking-tight">{slot.address}</p>
+                </div>
                 <div className="h-px bg-slate-100 w-full mt-4" />
              </div>
           </div>
@@ -1039,7 +1154,7 @@ const ReviewSlotsView: React.FC<{
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         <div className="flex items-center gap-4 text-slate-400">
           <ChevronRight className="w-5 h-5 rotate-90" />
-          <p className="text-xl font-bold">Today</p>
+          <p className="text-xl font-bold">Planned for {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
           <span className="bg-purple-50 text-purple-600 px-3 py-1 rounded-full text-xs font-bold">
             {slots.length} Slots • {totalHours} h
           </span>
