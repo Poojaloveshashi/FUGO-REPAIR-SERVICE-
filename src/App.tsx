@@ -129,13 +129,15 @@ interface UserProfile {
 
 type AppView = 'home' | 'slots' | 'repairs' | 'services' | 'profile' | 'details' | 'booking' | 
               'personal-info' | 'earnings' | 'payout' | 'shifts' | 'attendance' | 'documents' | 
-              'app-settings' | 'terms';
+              'app-settings' | 'terms' | 'permissions' | 'review-slots';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<AppView>('home');
+  const [permissionsGranted, setPermissionsGranted] = useState(false);
+  const [selectedSlots, setSelectedSlots] = useState<any[]>([]);
 
   const [bookedSlots, setBookedSlots] = useState<any[]>([]);
   const [viewingDoc, setViewingDoc] = useState<string | null>(null);
@@ -232,6 +234,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-fugo-zinc flex flex-col md:flex-row m-0 font-sans">
+      {!permissionsGranted && (
+        <PermissionsView onProceed={() => setPermissionsGranted(true)} />
+      )}
+      
       {/* Mobile Top Header */}
       <header className="md:hidden bg-white border-b border-black/5 p-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-2">
@@ -308,8 +314,22 @@ export default function App() {
                 key="slots"
                 onBack={() => setView('home')}
                 onBook={(slot) => {
-                  setBookedSlots(prev => [...prev, { ...slot, bookedAt: new Date() }]);
-                  setView('booking');
+                  setSelectedSlots([slot]);
+                  setView('review-slots');
+                }}
+              />
+            )}
+            {view === 'review-slots' && (
+              <ReviewSlotsView 
+                key="review-slots"
+                slots={selectedSlots}
+                onBack={() => setView('slots')}
+                onToggleSlot={(slot) => {
+                  setSelectedSlots(prev => prev.filter(s => s !== slot));
+                }}
+                onConfirm={() => {
+                  setBookedSlots(prev => [...prev, ...selectedSlots.map(s => ({ ...s, bookedAt: new Date() }))]);
+                  setView('home');
                 }}
               />
             )}
@@ -337,7 +357,7 @@ export default function App() {
                       className="flex-shrink-0 flex items-center gap-2 px-6 py-3 bg-black text-fugo rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-fugo hover:text-black transition-all"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>Start Induction</span>
+                      <span>Start Job</span>
                     </button>
                   </div>
                   {requests.length > 0 ? (
@@ -696,392 +716,276 @@ const HomeView: React.FC<{
   onStartJob: () => void,
   onOpenLogbook: () => void
 }> = ({ profile, requests, onSelectRequest, onBook, bookedSlots = [], onStartJob, onOpenLogbook }) => {
-  const activeBooking = bookedSlots.length > 0 ? bookedSlots[bookedSlots.length - 1] : null;
-
-  const activeRequests = requests.filter(r => r.status !== 'completed');
+  const activeShift = bookedSlots.length > 0 ? bookedSlots[bookedSlots.length - 1] : null;
+  const [earningsTab, setEarningsTab] = useState<'today' | 'week'>('today');
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="max-w-xl mx-auto space-y-6 pb-20"
+      className="max-w-xl mx-auto space-y-8 pb-32"
     >
-      {/* Greeting */}
-      <div className="px-4 pt-4">
-        <h2 className="text-3xl font-black uppercase tracking-tighter leading-none italic">
-          Hello, {profile.displayName.split(' ')[0]}
-        </h2>
-        <p className="text-sm font-bold opacity-40 uppercase tracking-widest mt-1">
-          {profile.role === 'customer' ? 'Your vehicle service hub' : 'Ready for your shift?'}
-        </p>
+      {/* Location Bar */}
+      <div className="flex items-center justify-between px-6 py-6 bg-white border-b border-slate-100 sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center">
+            <MapPin className="w-6 h-6 text-fugo" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-xl font-black uppercase tracking-tight">HYD-NALLAGANDLA NEW</h4>
+              <ChevronRight className="w-4 h-4 rotate-90 opacity-20" />
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">
+              Weekly payouts! Every Tuesday by 11:59 PM
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-4">
+          <Bell className="w-7 h-7 opacity-40" />
+          <Clock className="w-7 h-7 opacity-40" />
+        </div>
       </div>
 
-      {/* Customer Quick Actions */}
-      {profile.role === 'customer' && (
-        <div className="px-4 space-y-4">
-          {!activeBooking && (
-            <div 
-              onClick={onBook}
-              className="bg-orange-600 rounded-[2.5rem] p-8 text-white relative overflow-hidden cursor-pointer group hover:scale-[1.02] transition-all shadow-xl shadow-orange-600/20"
-            >
-              <div className="relative z-10">
-                <h3 className="text-4xl font-black uppercase italic leading-none tracking-tighter mb-2">Book a<br/>Service</h3>
-                <p className="text-sm font-bold opacity-80 uppercase tracking-widest italic">Fast diagnostic & repair stations</p>
-                <div className="mt-8">
-                   <button className="bg-white text-orange-600 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                     <Clock className="w-4 h-4" />
-                     <span>Check Slots</span>
-                   </button>
-                </div>
-              </div>
-              <div className="absolute right-[-20px] bottom-[-20px] opacity-10 group-hover:scale-110 transition-transform">
-                <Wrench className="w-48 h-48" />
-              </div>
-            </div>
-          )}
+      {/* Active Shift Banner */}
+      {activeShift && (
+        <div className="mx-6 p-6 bg-white rounded-3xl border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-3xl font-black">{activeShift.time || '05:01 PM'} - 07:00 PM</h3>
+            <span className="bg-purple-50 text-purple-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Upcoming</span>
+          </div>
           
-          <div className="grid grid-cols-2 gap-4">
-            <button 
-              onClick={() => onBook()} 
-              className="bg-white p-6 rounded-[2rem] border border-black/5 flex flex-col items-center text-center group"
-            >
-              <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-orange-600 group-hover:text-white transition-all">
-                <Search className="w-6 h-6" />
-              </div>
-              <p className="text-[10px] font-black uppercase tracking-widest">Diagnostic</p>
-            </button>
-            <button 
-               onClick={() => onBook()} 
-               className="bg-white p-6 rounded-[2rem] border border-black/5 flex flex-col items-center text-center group"
-            >
-              <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                <Shield className="w-6 h-6" />
-              </div>
-              <p className="text-[10px] font-black uppercase tracking-widest">Insurance</p>
-            </button>
+          <div className="flex gap-4 items-start bg-slate-50 p-4 rounded-2xl mb-4">
+            <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center">
+              <Clock className="w-6 h-6 text-slate-500" />
+            </div>
+            <div>
+              <h5 className="font-bold">Shift starts at {activeShift.time || '05:01 PM'}</h5>
+              <p className="text-sm text-slate-400 font-medium">Reach your Store before shift start time</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 text-slate-500">
+            <Info className="w-5 h-5 flex-shrink-0" />
+            <p className="text-sm font-medium">Please reach your store before slot start time.</p>
           </div>
         </div>
       )}
 
-      {/* Customer Active Repairs */}
-      {profile.role === 'customer' && activeRequests.length > 0 && (
-        <div className="px-4 space-y-4 pt-4">
-          <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 px-2">Active Service Manifests</h4>
-          {activeRequests.map(req => (
-            <ActiveRepairCard key={req.id} request={req} onClick={() => onSelectRequest(req)} />
-          ))}
+      {/* My Earnings Segment */}
+      <div className="px-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-3xl font-black tracking-tight">My Earnings</h2>
         </div>
-      )}
 
-      {/* Welcome for new users with no activity */}
-      {profile.role === 'customer' && activeRequests.length === 0 && !activeBooking && (
-        <div className="px-4 py-8">
-           <div className="bg-black/5 rounded-[2.5rem] p-12 text-center border-4 border-dashed border-black/10">
-              <History className="w-12 h-12 mx-auto mb-4 opacity-10" />
-              <h4 className="text-xl font-black uppercase italic tracking-tighter opacity-20">No Recent Activity</h4>
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-20 mt-2">Start your first service journey above</p>
+        <div className="bg-white rounded-[2.5rem] p-4 shadow-sm border border-slate-100">
+          <div className="flex p-2 bg-slate-50 rounded-2xl mb-8">
+            <button 
+              onClick={() => setEarningsTab('today')}
+              className={cn(
+                "flex-1 py-4 px-6 rounded-xl text-lg font-black transition-all",
+                earningsTab === 'today' ? "bg-white text-black shadow-sm" : "text-slate-400"
+              )}
+            >
+              Today
+            </button>
+            <button 
+              onClick={() => setEarningsTab('week')}
+              className={cn(
+                "flex-1 py-4 px-6 rounded-xl text-lg font-black transition-all",
+                earningsTab === 'week' ? "bg-white text-black shadow-sm" : "text-slate-400"
+              )}
+            >
+              This Week
+            </button>
+          </div>
+
+          <div className="text-center py-12 px-6">
+             <div className="relative inline-block mb-6">
+                <div className="w-24 h-24 bg-purple-50 rounded-3xl rotate-12 flex items-center justify-center">
+                   <Truck className="w-12 h-12 text-slate-200 -rotate-12" />
+                </div>
+             </div>
+             <h4 className="text-2xl font-black mb-2">Nothing to see here, yet.</h4>
+             <p className="text-slate-400 font-medium mb-10">Book Slots and Start Earning!</p>
+
+             <div className="flex gap-4">
+                <button 
+                  onClick={onBook}
+                  className="flex-1 bg-fugo py-5 rounded-2xl text-lg font-black text-white hover:bg-fugo-accent transition-colors flex items-center justify-center gap-2"
+                >
+                  Book Slots <ChevronRight className="w-5 h-5" />
+                </button>
+                <button 
+                  className="flex-1 bg-slate-50 py-5 rounded-2xl text-lg font-black text-slate-600 hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  Show Earnings <ChevronRight className="w-5 h-5" />
+                </button>
+             </div>
+          </div>
+
+          <div className="flex justify-center border-t border-slate-100 pt-6 mt-4">
+             <p className="text-sm font-bold text-slate-300 uppercase tracking-widest">
+               Last Updated at {new Date().toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Bonus Card */}
+      <div className="mx-6 bg-orange-50 rounded-[2.5rem] p-8 relative overflow-hidden border-2 border-orange-100 shadow-sm group">
+        <div className="relative z-10 pr-24">
+          <h3 className="text-3xl font-black text-orange-950 mb-2">Earn ₹1000 Joining Bonus</h3>
+          <p className="text-sm font-medium text-orange-900/60 mb-8">Complete at least 300 orders in first 7 days</p>
+          <button 
+            onClick={onBook}
+            className="flex items-center gap-2 bg-white text-orange-950 px-6 py-4 rounded-xl font-bold shadow-sm group-hover:bg-orange-950 group-hover:text-white transition-colors"
+          >
+            Book Slots <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="absolute right-[-10px] bottom-[-10px] w-40 h-40 group-hover:scale-110 transition-transform">
+           <div className="w-full h-full bg-orange-200 rotate-12 flex items-center justify-center rounded-3xl">
+              <Zap className="w-20 h-20 text-orange-400 -rotate-12" />
            </div>
         </div>
-      )}
-
-      {/* Active Shift / Booking (Technician only usually, or if booking is active) */}
-      {(profile.role === 'technician' || (profile.role === 'customer' && activeBooking)) && (
-        <>
-          {activeBooking ? (
-            <div className="mx-4 bg-fugo-dark rounded-[2.5rem] p-8 text-white relative overflow-hidden shadow-2xl shadow-black/20">
-              <div className="relative z-10">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-2 h-2 rounded-full bg-fugo animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-fugo">
-                    {profile.role === 'technician' ? 'Active Shift' : 'Service Appointment'}
-                  </span>
-                </div>
-                <h3 className="text-3xl font-black uppercase italic leading-none tracking-tighter mb-4">{activeBooking.name}</h3>
-                
-                <div className="grid grid-cols-2 gap-6 mb-6">
-                   <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Scheduled Time</p>
-                      <p className="text-sm font-bold italic">{activeBooking.time || new Date(activeBooking.bookedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                   </div>
-                   <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Scheduled Date</p>
-                      <p className="text-sm font-bold italic">May {activeBooking.date || '15'}, 2026</p>
-                   </div>
-                   {activeBooking.address && (
-                     <div className="col-span-2">
-                        <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Induction Location</p>
-                        <p className="text-sm font-bold italic truncate">{activeBooking.address}</p>
-                     </div>
-                   )}
-                </div>
-                
-                <div className="flex justify-between items-end">
-                   <div>
-                      <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Distance</p>
-                      <p className="text-sm font-bold italic">{activeBooking.distance || '0'} KM</p>
-                   </div>
-                   {profile.role === 'technician' && (
-                     <button 
-                      onClick={() => onOpenLogbook()}
-                      className="bg-fugo text-black px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-white transition-all shadow-lg"
-                     >
-                       <History className="w-4 h-4" />
-                       <span>Open Repair Logbook</span>
-                     </button>
-                   )}
-                </div>
-              </div>
-              <div className="absolute right-[-20px] bottom-[-20px] opacity-10">
-                <Truck className="w-48 h-48" />
-              </div>
-            </div>
-          ) : (
-            profile.role === 'technician' && (
-              /* Book Slots Hero */
-              <div 
-                onClick={onBook}
-                className="mx-4 bg-orange-600 rounded-[2.5rem] p-8 text-white relative overflow-hidden cursor-pointer group hover:scale-[1.02] transition-all shadow-xl shadow-orange-600/20"
-              >
-                <div className="relative z-10">
-                  <h3 className="text-4xl font-black uppercase italic leading-none tracking-tighter mb-2">Book & Start<br/>Earning</h3>
-                  <p className="text-sm font-bold opacity-80 uppercase tracking-widest">Select your preferred location</p>
-                </div>
-                <div className="absolute right-[-20px] bottom-[-20px] opacity-10 group-hover:scale-110 transition-transform">
-                  <Wrench className="w-48 h-48" />
-                </div>
-              </div>
-            )
-          )}
-        </>
-      )}
-
-      {/* Earnings Summary (Technician only) */}
-      {profile.role === 'technician' && (
-        <div className="mx-4 bg-white rounded-[2.5rem] p-8 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-black/5">
-          <div className="flex items-center justify-between mb-8">
-            <h4 className="text-xl font-black uppercase italic tracking-tighter">My Earnings</h4>
-            <ChevronRight className="w-6 h-6 opacity-20" />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Today</p>
-              <p className="text-2xl font-black italic tracking-tighter text-fugo-dark leading-none">₹850</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-40">This Week</p>
-              <p className="text-2xl font-black italic tracking-tighter text-fugo-dark leading-none">₹5,450</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Total</p>
-              <p className="text-2xl font-black italic tracking-tighter text-orange-600 leading-none">₹12.8K</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recent Activity (Technician only) */}
-      {profile.role === 'technician' && (
-        <div className="px-4 pt-4">
-          <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4 px-2">Recent Shift Logs</h4>
-          <div className="space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="bg-white rounded-3xl p-4 flex items-center justify-between border border-black/5 shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-2xl bg-orange-50 flex items-center justify-center">
-                    <Clock className="w-5 h-5 text-orange-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-black uppercase italic">Electronic City</p>
-                    <p className="text-[10px] font-bold opacity-40">May 1{i}, 09:00 AM - 01:00 PM</p>
-                  </div>
-                </div>
-                <p className="text-sm font-black text-fugo-success">+₹450</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      </div>
     </motion.div>
   );
 }
 
 const SlotsView: React.FC<{ onBack: () => void, onBook: (slot: any) => void }> = ({ onBack, onBook }) => {
-  const [distance, setDistance] = useState(15);
-  const [selectedDate, setSelectedDate] = useState('15');
+  const [selectedDate, setSelectedDate] = useState('16');
   const dates = [
-    { day: 'Mon', date: '15' },
-    { day: 'Tue', date: '16' },
-    { day: 'Wed', date: '17' },
-    { day: 'Thu', date: '18' },
-    { day: 'Fri', date: '19' },
-    { day: 'Sat', date: '20' },
+    { day: 'Mon', date: '11' },
+    { day: 'Tue', date: '12' },
+    { day: 'Wed', date: '13' },
+    { day: 'Thu', date: '14' },
+    { day: 'Fri', date: '15' },
+    { day: 'Sat', date: '16' },
   ];
 
-  const slotData = [
-    { name: 'Store A-Hub', address: 'Indiranagar, Bangalore', earning: '₹450', distance: 3.2, positions: 2 },
-    { name: 'Fugo Center South', address: 'Koramangala 4th Block', earning: '₹550', distance: 4.8, positions: 1 },
-    { name: 'Service Point 09', address: 'HSR Layout Sector 2', earning: '₹380', distance: 6.1, positions: 3 },
-    { name: 'Gateway Hub', address: 'Electronic City Phase 1', earning: '₹600', distance: 12, positions: 1 },
-    { name: 'Whitefield Tech-Point', address: 'Whitefield Main Road', earning: '₹750', distance: 18, positions: 4 },
-    { name: 'Metro Mall Station', address: 'Rajajinagar, Bangalore', earning: '₹420', distance: 14, positions: 2 },
-    { name: 'North Hub Hebbal', address: 'Hebbal Flyover', earning: '₹500', distance: 22, positions: 5 },
-    { name: 'Jayanagar Plaza', address: 'Jayanagar 4th Block', earning: '₹480', distance: 8.5, positions: 2 },
-    { name: 'Banjara Tech Hub', address: 'Banjara Hills Road No. 1, Hyderabad', earning: '₹650', distance: 5.2, positions: 3 },
-    { name: 'Gachibowli Service Node', address: 'Financial District, Hyderabad', earning: '₹800', distance: 15, positions: 6 },
-    { name: 'HITEC City Express', address: 'Cyber Towers Area, Hyderabad', earning: '₹720', distance: 12, positions: 4 },
-    { name: 'Jubilee Hills Point', address: 'Road No. 36, Hyderabad', earning: '₹580', distance: 7.1, positions: 2 },
-    { name: 'Secunderabad Hub', address: 'MG Road, Secunderabad', earning: '₹440', distance: 4.2, positions: 3 },
-    { name: 'Kukatpally Center', address: 'KPHB Colony, Hyderabad', earning: '₹520', distance: 9.8, positions: 5 },
-    { name: 'Madhapur Station', address: 'Cyberabad, Madhapur', earning: '₹680', distance: 6.5, positions: 3 },
-    { name: 'Ameerpet Junction', address: 'Ameerpet Cross Road', earning: '₹460', distance: 4.1, positions: 2 },
-    { name: 'Manikonda Peak', address: 'Manikonda Main Road', earning: '₹590', distance: 8.2, positions: 1 },
-    { name: 'Miyapur Depot-Link', address: 'Miyapur, Hyderabad', earning: '₹710', distance: 16.5, positions: 4 },
-    { name: 'Kondapur North Hub', address: 'Kondapur, Hyderabad', earning: '₹640', distance: 7.8, positions: 2 },
-    { name: 'LB Nagar Junction', address: 'LB Nagar, Hyderabad', earning: '₹530', distance: 14.2, positions: 3 },
-    { name: 'Uppal Express Hub', address: 'Uppal, Hyderabad', earning: '₹490', distance: 11.5, positions: 2 },
-    { name: 'Charminar Heritage', address: 'Old City, Hyderabad', earning: '₹550', distance: 3.8, positions: 5 },
+  const slots = [
+    { time: '02:01pm – 03:00pm', earning: 'Earn upto ₹100', positions: 29, address: 'HYD-NALLAGANDLA NEW' },
+    { time: '03:01pm – 05:00pm', earning: 'Earn upto ₹200', positions: 28, address: 'HYD-NALLAGANDLA NEW' },
+    { time: '12:01pm – 02:00pm', earning: 'Earn upto ₹200', positions: 28, address: 'HYD-NALLAGANDLA NEW' },
+    { time: '07:01pm – 09:00pm', earning: 'Earn upto ₹400', positions: 27, address: 'HYD-NALLAGANDLA NEW' },
+    { time: '05:01pm – 07:00pm', earning: 'Earn upto ₹400', positions: 27, address: 'HYD-NALLAGANDLA NEW' },
+    { time: '09:01pm – 11:00pm', earning: 'Earn upto ₹500', positions: 27, address: 'HYD-NALLAGANDLA NEW' },
   ];
 
-  const times = ['09:00 AM', '11:00 AM', '02:00 PM', '04:00 PM', '06:00 PM'];
-  const [selectedTimes, setSelectedTimes] = useState<Record<number, string>>({});
-
-  const filteredSlots = slotData.filter(slot => slot.distance <= distance);
+  const [toggled, setToggled] = useState<Record<number, boolean>>({});
 
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="max-w-xl mx-auto pb-20 mt-0"
+      className="max-w-xl mx-auto flex flex-col h-screen"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-8">
-        <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-black/5">
-          <ChevronLeft className="w-6 h-6" />
-        </button>
-        <h2 className="text-xl font-black uppercase tracking-widest italic">Service Slots</h2>
-        <Bell className="w-6 h-6 opacity-20" />
-      </div>
-
-      {/* Location Selector */}
-      <div className="px-6 mb-8">
-        <div className="bg-white p-6 rounded-[2rem] border border-black/5 shadow-sm flex items-center justify-between">
+      <div className="p-6 bg-white space-y-4">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <MapPin className="w-5 h-5 text-orange-600" />
-            <p className="text-sm font-black uppercase tracking-tight italic">Sarjapur Main Road</p>
+             <h4 className="text-2xl font-black">Gachibowli</h4>
+             <ChevronRight className="w-5 h-5 rotate-90 opacity-40" />
           </div>
-          <ChevronRight className="w-5 h-5 opacity-20 rotate-90" />
+          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+             <Clock className="w-6 h-6 opacity-40" />
+          </div>
         </div>
+        <p className="text-sm text-slate-400 font-medium">2-10/A/2, Gopanapalli Thanda, Rangareddy, H...</p>
       </div>
 
-      {/* Date Selector */}
-      <div className="flex gap-4 overflow-x-auto px-6 mb-8 pb-2 scrollbar-none">
+      {/* Date Scroll */}
+      <div className="flex gap-4 overflow-x-auto px-6 py-4 border-b border-slate-100 bg-white scrollbar-none">
         {dates.map((d) => (
           <button
             key={d.date}
             onClick={() => setSelectedDate(d.date)}
             className={cn(
-              "flex-shrink-0 w-16 h-24 rounded-3xl flex flex-col items-center justify-center gap-2 transition-all border",
-              selectedDate === d.date 
-                ? "bg-fugo-dark text-white border-fugo-dark shadow-lg shadow-orange-600/20" 
-                : "bg-white text-black/40 border-black/5"
+              "flex-shrink-0 w-16 flex flex-col items-center gap-2",
+              selectedDate === d.date ? "text-black" : "text-slate-300"
             )}
           >
-            <span className="text-[10px] font-black uppercase tracking-widest">{d.day}</span>
-            <span className="text-xl font-black italic">{d.date}</span>
+            <span className="text-sm font-bold">{d.day}</span>
+            <span className={cn(
+              "w-12 h-12 flex items-center justify-center rounded-2xl text-xl font-black transition-all",
+              selectedDate === d.date ? "bg-slate-50 border-2 border-purple-600" : "bg-slate-50"
+            )}>
+              {d.date}
+            </span>
+            {selectedDate === d.date && <div className="h-1 w-8 bg-purple-600 rounded-full" />}
           </button>
         ))}
+        <button className="flex-shrink-0 w-12 flex flex-col items-center justify-center text-slate-300">
+          <ChevronRight className="w-6 h-6" />
+        </button>
       </div>
 
-      {/* Distance Filter */}
-      <div className="px-6 mb-8">
-        <div className="bg-white p-6 rounded-[2rem] border border-black/5 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40">Distance Range</h4>
-            <span className="text-[10px] font-black uppercase italic">Up to {distance} KM</span>
-          </div>
-          <div className="relative h-6 flex items-center">
-            <input 
-              type="range" 
-              min="1" 
-              max="25" 
-              value={distance} 
-              onChange={(e) => setDistance(Number(e.target.value))}
-              className="w-full h-1.5 bg-black/5 rounded-full appearance-none cursor-pointer accent-orange-600"
-            />
-          </div>
-        </div>
+      {/* Filters */}
+      <div className="p-6 flex gap-4">
+         <button className="flex-1 flex items-center justify-between bg-purple-50 text-purple-600 p-4 rounded-2xl border border-purple-100 font-black text-sm uppercase">
+            <div className="flex items-center gap-2">
+               <ChevronRight className="w-4 h-4 -rotate-90" />
+               Low to High Distance
+            </div>
+            <X className="w-4 h-4 opacity-40" />
+         </button>
+         <button className="w-24 flex items-center justify-center bg-slate-50 text-slate-600 p-4 rounded-2xl border border-slate-100 font-black text-sm uppercase gap-2">
+            <Menu className="w-4 h-4" /> All
+         </button>
       </div>
 
-      {/* Slots List */}
-      <div className="px-6 space-y-4">
-        {filteredSlots.map((slot, i) => (
-          <div key={i} className="bg-white rounded-[2.5rem] p-6 border border-black/5 shadow-sm group hover:border-fugo transition-all">
-            <div className="flex justify-between items-start mb-6">
-              <div>
-                <h4 className="text-xl font-black uppercase italic tracking-tighter mb-1 leading-none">{slot.name}</h4>
-                <div className="flex items-center gap-2 opacity-40">
-                  <MapPin className="w-3 h-3" />
-                  <p className="text-[10px] font-bold uppercase">{slot.address}</p>
+      {/* List */}
+      <div className="flex-1 overflow-y-auto px-6 pb-32 space-y-4">
+        {slots.map((slot, i) => (
+          <div key={i} className="flex gap-6 items-start p-4 group">
+             <div 
+               onClick={() => setToggled(prev => ({ ...prev, [i]: !prev[i] }))}
+               className={cn(
+                 "w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all cursor-pointer",
+                 toggled[i] ? "bg-purple-600 border-purple-600 text-white" : "border-slate-200"
+               )}
+             >
+               {toggled[i] && <CheckCircle className="w-5 h-5" />}
+             </div>
+             <div className="flex-1 space-y-1">
+                <div className="flex items-center justify-between">
+                   <h4 className="text-2xl font-black">{slot.time}</h4>
+                   <span className="bg-green-100 text-green-600 px-3 py-1 rounded-full text-xs font-bold uppercase">
+                     {slot.positions} Free
+                   </span>
                 </div>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] font-black uppercase tracking-widest text-orange-600 opacity-60 mb-1">Potential</p>
-                <p className="text-2xl font-black italic tracking-tighter leading-none">{slot.earning}</p>
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-3">Available Operational Windows</p>
-              <div className="flex flex-wrap gap-2">
-                {times.map(t => (
-                  <button 
-                    key={t}
-                    onClick={() => setSelectedTimes(prev => ({ ...prev, [i]: t }))}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase border transition-all",
-                      selectedTimes[i] === t 
-                        ? "bg-fugo text-fugo-dark border-fugo" 
-                        : "bg-white text-black/40 border-black/5 hover:border-black/20"
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            <div className="flex items-center justify-between pt-6 border-t border-black/5">
-              <div className="flex gap-4">
-                <div className="flex items-center gap-1.5">
-                  <Truck className="w-3.5 h-3.5 opacity-20" />
-                  <span className="text-[10px] font-black uppercase tracking-widest opacity-40">{slot.distance} KM</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <UserIcon className="w-3.5 h-3.5 opacity-20" />
-                  <span className="text-[10px] font-black uppercase tracking-widest opacity-40">{slot.positions} Pos Open</span>
-                </div>
-              </div>
-              <button 
-                onClick={() => onBook({ ...slot, time: selectedTimes[i] || '09:00 AM', date: selectedDate })}
-                className="bg-fugo-dark text-white px-6 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-fugo hover:text-black transition-all"
-              >
-                Book Slot
-              </button>
-            </div>
+                <p className="text-purple-600 font-bold underline decoration-2 underline-offset-4">{slot.earning}</p>
+                <div className="h-px bg-slate-100 w-full mt-4" />
+             </div>
           </div>
         ))}
-        {filteredSlots.length === 0 && (
-          <div className="py-20 text-center opacity-40">
-            <MapPin className="w-12 h-12 mx-auto mb-4 opacity-20" />
-            <p className="text-[10px] font-black uppercase tracking-widest">No slots in this range</p>
-          </div>
-        )}
+      </div>
+
+      {/* Bottom Bar */}
+      <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+         <div className="flex gap-6 items-center">
+            <div className="flex-1">
+               <p className="text-2xl font-black">Earn upto ₹800</p>
+               <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">4 hours</p>
+            </div>
+            <button 
+              onClick={() => {
+                const selected = slots.filter((_, i) => toggled[i]);
+                if (selected.length > 0) onBook(selected[0]);
+              }}
+              className="px-12 py-5 bg-fugo rounded-2xl text-lg font-black text-white hover:bg-fugo-accent transition-colors shadow-lg shadow-purple-600/20"
+            >
+              Book Now
+            </button>
+         </div>
       </div>
     </motion.div>
   );
 }
+const Menu: React.FC<{ className?: string }> = ({ className }) => <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 4H21M12 9H21M12 14H21M12 19H21M3 4H9V10H3V4ZM3 14H9V20H3V14Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 function DetailSubPage({ title, onBack, children }: { title: string, onBack: () => void, children: React.ReactNode, key?: string }) {
   return (
@@ -1106,7 +1010,139 @@ function DetailSubPage({ title, onBack, children }: { title: string, onBack: () 
   );
 }
 
-// Sub-components
+const ReviewSlotsView: React.FC<{ 
+  slots: any[], 
+  onBack: () => void, 
+  onConfirm: () => void,
+  onToggleSlot: (slot: any) => void
+}> = ({ slots, onBack, onConfirm, onToggleSlot }) => {
+  const totalHours = slots.length * 2; // Assuming 2 hours per slot
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="max-w-xl mx-auto flex flex-col h-screen"
+    >
+      <div className="flex items-center justify-between p-6">
+        <div className="flex items-center gap-4">
+          <h2 className="text-3xl font-black">Review Slots</h2>
+          <span className="bg-purple-100 text-purple-600 px-3 py-1 rounded-full text-sm font-bold">
+            {slots.length} Slots • {totalHours} h
+          </span>
+        </div>
+        <button onClick={onBack} className="p-2 rounded-full hover:bg-black/5">
+          <X className="w-8 h-8 opacity-40" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex items-center gap-4 text-slate-400">
+          <ChevronRight className="w-5 h-5 rotate-90" />
+          <p className="text-xl font-bold">Today</p>
+          <span className="bg-purple-50 text-purple-600 px-3 py-1 rounded-full text-xs font-bold">
+            {slots.length} Slots • {totalHours} h
+          </span>
+        </div>
+
+        <div className="space-y-4">
+          {slots.map((slot, i) => (
+            <div key={i} className="bg-white rounded-3xl p-6 border border-slate-100 flex gap-4">
+              <div className="flex-shrink-0 pt-1">
+                <input 
+                  type="checkbox" 
+                  checked={true} 
+                  onChange={() => onToggleSlot(slot)}
+                  className="w-6 h-6 rounded-md accent-fugo"
+                />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-2xl font-bold mb-2">{slot.time} — {slot.endTime || '09:00 pm'}</h4>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="bg-green-100 text-green-600 px-2 py-0.5 rounded-lg text-xs font-bold uppercase">
+                    {slot.positions || 27} Free Slot
+                  </span>
+                </div>
+                <p className="text-slate-400 font-bold uppercase tracking-tight text-sm">
+                  {slot.address.toUpperCase()} • 2 h • 20 mins break
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-6 pb-12">
+        <button 
+          onClick={onConfirm}
+          className="w-full bg-fugo py-6 rounded-3xl text-xl font-black text-white hover:bg-fugo-accent transition-colors"
+        >
+          Confirm & Book
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+const PermissionsView: React.FC<{ onProceed: () => void }> = ({ onProceed }) => {
+  const permissions = [
+    { icon: Bell, title: 'Push Notification', desc: 'Turn on notifications to get updates about your application' },
+    { icon: Camera, title: 'Camera', desc: 'We need your camera to take pictures or upload documents' },
+    { icon: Zap, title: 'Battery Usage', desc: 'We need you to allow unrestricted battery usage to connect you to nearby Stores' },
+    { icon: MapPin, title: 'Location', desc: 'We need your location to connect you to nearby Stores' },
+    { icon: MapPin, title: 'Background Location', desc: 'We require background location to accurate rider updates and geofence detection' },
+  ];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 bg-white z-[100] flex flex-col p-8 overflow-y-auto"
+    >
+      <div className="flex-1 flex flex-col items-center justify-center pt-12 pb-20">
+        <div className="w-48 h-48 bg-purple-50 rounded-full flex items-center justify-center mb-12 relative">
+          <div className="absolute inset-0 bg-purple-100 rounded-full scale-110 opacity-20 animate-pulse" />
+          <div className="w-32 h-56 bg-purple-100/50 rounded-3xl border-4 border-purple-200 flex flex-col p-3 gap-2">
+             <div className="w-full h-8 bg-purple-200/50 rounded-lg flex items-center justify-center">
+               <MapPin className="w-4 h-4 text-purple-600" />
+             </div>
+             <div className="w-full h-8 bg-purple-200/50 rounded-lg flex items-center justify-center">
+               <Shield className="w-4 h-4 text-purple-600" />
+             </div>
+             <div className="w-full h-8 bg-purple-200/50 rounded-lg flex items-center justify-center">
+               <Camera className="w-4 h-4 text-purple-600" />
+             </div>
+          </div>
+        </div>
+
+        <h2 className="text-4xl font-black mb-4 text-center">Permissions Required</h2>
+        <p className="text-lg text-slate-500 text-center mb-12 max-w-sm">
+          Grant the required access to continue using the App
+        </p>
+
+        <div className="w-full max-w-md space-y-8">
+          {permissions.map((p, i) => (
+            <div key={i} className="flex gap-6">
+              <div className="flex-shrink-0">
+                <p.icon className="w-8 h-8 text-slate-600" />
+              </div>
+              <div>
+                <h4 className="text-xl font-bold mb-1">{p.title}</h4>
+                <p className="text-sm text-slate-500 leading-relaxed">{p.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button 
+        onClick={onProceed}
+        className="w-full bg-fugo py-6 rounded-2xl text-xl font-black text-white hover:bg-fugo-accent transition-colors mt-8"
+      >
+        Proceed
+      </button>
+    </motion.div>
+  );
+};
 
 function ProfileItem({ 
   icon: Icon, 
@@ -1937,7 +1973,7 @@ function RepairForm({ profile, onSuccess, onCancel }: { profile: UserProfile, on
       className="max-w-4xl mx-auto"
     >
       <div className="mb-12">
-        <h2 className="text-3xl font-black uppercase tracking-tighter italic">Service Induction</h2>
+        <h2 className="text-3xl font-black uppercase tracking-tighter italic">Service Registration</h2>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-10">

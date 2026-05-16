@@ -5,11 +5,12 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-fugo: #ea580c; /* orange-600 */
-  --color-fugo-dark: #000000;
-  --color-fugo-muted: #4b5563;
-  --color-fugo-zinc: #f9fafb; /* Soft gray background */
-  --color-fugo-success: #16a34a;
+  --color-fugo: #a855f7; /* purple-500 */
+  --color-fugo-dark: #1e1b4b; /* indigo-950 */
+  --color-fugo-muted: #64748b;
+  --color-fugo-zinc: #f8fafc;
+  --color-fugo-success: #10b981;
+  --color-fugo-accent: #d946ef; /* fuchsia-500 */
 }
 
 @layer base {
