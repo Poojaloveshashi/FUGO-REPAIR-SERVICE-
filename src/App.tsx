@@ -139,6 +139,8 @@ export default function App() {
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [selectedSlots, setSelectedSlots] = useState<any[]>([]);
   const [isShiftStarted, setIsShiftStarted] = useState(false);
+  const [isMockAuthenticated, setIsMockAuthenticated] = useState(false);
+  const [mockPhone, setMockPhone] = useState('');
 
   const [bookedSlots, setBookedSlots] = useState<any[]>([]);
   const [viewingDoc, setViewingDoc] = useState<string | null>(null);
@@ -148,7 +150,7 @@ export default function App() {
   
   // Seed initial mock data for analysis
   useEffect(() => {
-    if (requests.length === 0 && profile?.role === 'technician') {
+    if (requests.length === 0 && (profile?.role === 'technician' || isMockAuthenticated)) {
       const mockRequests: RepairRequest[] = [
         {
           id: 'REQ-DEMO-001',
@@ -286,7 +288,24 @@ export default function App() {
     );
   }
 
-  const activeProfile = profile || { uid: 'guest', email: '', displayName: 'Guest User', role: 'customer' as Role };
+  const activeProfile = profile || (isMockAuthenticated ? { 
+    uid: 'mock-' + mockPhone, 
+    email: mockPhone + '@fugo.internal', 
+    displayName: 'Fugo Tech ' + mockPhone.slice(-4), 
+    role: 'technician' as Role,
+    phoneNumber: mockPhone 
+  } : { uid: 'guest', email: '', displayName: 'Guest User', role: 'customer' as Role });
+
+  if (!user && !isMockAuthenticated) {
+    return (
+      <LoginView 
+        onLogin={(phone) => {
+          setMockPhone(phone);
+          setIsMockAuthenticated(true);
+        }} 
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-fugo-zinc flex flex-col md:flex-row m-0 font-sans">
@@ -328,9 +347,12 @@ export default function App() {
             <p className="text-[10px] font-black uppercase tracking-widest text-fugo/50">Authorized User</p>
             <p className="text-sm font-bold truncate">{activeProfile.displayName}</p>
           </div>
-          {user ? (
+          {user || isMockAuthenticated ? (
             <button 
-              onClick={logout}
+              onClick={() => {
+                logout();
+                setIsMockAuthenticated(false);
+              }}
               className="flex items-center gap-3 w-full px-4 py-3 bg-fugo text-fugo-dark hover:bg-white transition-all font-black uppercase text-xs"
             >
               <LogOut className="w-4 h-4" />
@@ -976,14 +998,14 @@ const SlotsView: React.FC<{ onBack: () => void, onBook: (slot: any) => void }> =
   const [selectedDate, setSelectedDate] = useState(dates[0].date);
 
   const slots = [
-    { time: '08:00am – 10:00am', earning: 'Earn upto ₹350', positions: 12, address: 'DLF Cyber City, Gachibowli' },
-    { time: '10:01am – 12:00pm', earning: 'Earn upto ₹400', positions: 8, address: 'Financial District, Gachibowli' },
-    { time: '12:01pm – 02:00pm', earning: 'Earn upto ₹300', positions: 15, address: 'Mindspace IT Park, Gachibowli' },
-    { time: '02:01pm – 04:00pm', earning: 'Earn upto ₹300', positions: 20, address: 'Gachibowli Stadium Road' },
-    { time: '04:01pm – 06:00pm', earning: 'Earn upto ₹450', positions: 5, address: 'IIIT Junction Hub, Gachibowli' },
-    { time: '06:01pm – 08:00pm', earning: 'Earn upto ₹500', positions: 2, address: 'Gachibowli Central Mall Point' },
-    { time: '08:01pm – 10:00pm', earning: 'Earn upto ₹600', positions: 4, address: 'Wipro Circle Plaza, Gachibowli' },
-    { time: '10:01pm – 12:00am', earning: 'Earn upto ₹700', positions: 10, address: 'ORR Exit Station, Gachibowli' },
+    { time: '08:00am – 10:00am', earning: 'Earn upto ₹350', positions: 12, address: 'Aparna Sarovar Grande, Nallagandla' },
+    { time: '10:01am – 12:00pm', earning: 'Earn upto ₹400', positions: 8, address: 'Gulmohar Park Colony Hub' },
+    { time: '12:01pm – 02:00pm', earning: 'Earn upto ₹300', positions: 15, address: 'Tellapur Main Road Station' },
+    { time: '02:01pm – 04:00pm', earning: 'Earn upto ₹300', positions: 20, address: 'Citizen\'s Hospital Circle' },
+    { time: '04:01pm – 06:00pm', earning: 'Earn upto ₹450', positions: 5, address: 'Nallagandla Bypass Terminal' },
+    { time: '06:01pm – 08:00pm', earning: 'Earn upto ₹500', positions: 2, address: 'Lingampally X Roads Point' },
+    { time: '08:01pm – 10:00pm', earning: 'Earn upto ₹600', positions: 4, address: 'BHEL Township Entry Node' },
+    { time: '10:01pm – 12:00am', earning: 'Earn upto ₹700', positions: 10, address: 'Tara Nagar Junction, Serilingampally' },
   ];
 
   const [toggled, setToggled] = useState<Record<number, boolean>>({});
@@ -998,14 +1020,14 @@ const SlotsView: React.FC<{ onBack: () => void, onBook: (slot: any) => void }> =
       <div className="p-6 bg-white space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <h4 className="text-2xl font-black">Gachibowli</h4>
+             <h4 className="text-2xl font-black">Nallagandla</h4>
              <ChevronRight className="w-5 h-5 rotate-90 opacity-40" />
           </div>
           <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
              <Clock className="w-6 h-6 opacity-40" />
           </div>
         </div>
-        <p className="text-sm text-slate-400 font-medium">2-10/A/2, Gopanapalli Thanda, Rangareddy, H...</p>
+        <p className="text-sm text-slate-400 font-medium">Near Aparna Sarovar, Nallagandla, Hyderabad 500019</p>
       </div>
 
       {/* Date Scroll */}
@@ -3139,4 +3161,113 @@ function RepairDetails({ request, profile, onBack }: { request: RepairRequest, p
     </motion.div>
   );
 }
+
+const LoginView: React.FC<{ onLogin: (phone: string) => void }> = ({ onLogin }) => {
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [step, setStep] = useState<'phone' | 'otp'>('phone');
+  const [loading, setLoading] = useState(false);
+
+  const handlePhoneSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (phone.length === 10) {
+      setLoading(true);
+      setTimeout(() => {
+        setLoading(false);
+        setStep('otp');
+      }, 1000);
+    }
+  };
+
+  const handleOtpSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp === '123456' || otp === '000000') { // Mock OTPs
+      setLoading(true);
+      setTimeout(() => {
+        setLoading(false);
+        onLogin(phone);
+      }, 1000);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-fugo-zinc flex items-center justify-center p-6">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-[2.5rem] p-10 shadow-2xl border border-black/5"
+      >
+        <div className="flex flex-col items-center mb-10">
+          <Wrench className="w-16 h-16 text-fugo mb-4" />
+          <h2 className="text-4xl font-black italic tracking-tighter leading-none text-center">FUGO TERMINAL ACCESS</h2>
+          <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mt-4">Automated Repair & Service Hub</p>
+        </div>
+
+        {step === 'phone' ? (
+          <form onSubmit={handlePhoneSubmit} className="space-y-6">
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-2 block">Enterprise Phone Link</label>
+              <div className="relative">
+                <span className="absolute left-6 top-1/2 -translate-y-1/2 text-xl font-black italic text-black/20">+91</span>
+                <input 
+                  type="tel"
+                  maxLength={10}
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                  className="w-full bg-fugo-zinc border-4 border-black/5 rounded-2xl py-6 pl-20 pr-6 text-2xl font-black italic tracking-tight focus:border-fugo outline-none transition-all placeholder:italic placeholder:opacity-20"
+                  placeholder="98453 00000"
+                  required
+                />
+              </div>
+            </div>
+            <button 
+              type="submit"
+              disabled={phone.length !== 10 || loading}
+              className="w-full bg-black text-fugo py-6 rounded-2xl text-lg font-black uppercase tracking-widest hover:bg-fugo hover:text-black transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              {loading ? "Authenticating..." : (
+                <>
+                  <span>Send OTP</span>
+                  <ChevronRight className="w-6 h-6" />
+                </>
+              )}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleOtpSubmit} className="space-y-6">
+            <div>
+              <div className="flex justify-between items-end mb-2">
+                <label className="text-[10px] font-black uppercase tracking-widest opacity-40 block">Verification Protocol</label>
+                <button type="button" onClick={() => setStep('phone')} className="text-[8px] font-black uppercase text-orange-600">Change Number</button>
+              </div>
+              <input 
+                type="text"
+                maxLength={6}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                className="w-full bg-fugo-zinc border-4 border-black/5 rounded-2xl py-6 px-6 text-center text-4xl font-black italic tracking-[0.5em] focus:border-fugo outline-none transition-all placeholder:text-black/5"
+                placeholder="000000"
+                autoFocus
+                required
+              />
+              <p className="text-[10px] font-bold text-center mt-4 opacity-40 uppercase tracking-widest">Enter the 6-digit code sent to +91 {phone}</p>
+            </div>
+            <button 
+              type="submit"
+              disabled={otp.length !== 6 || loading}
+              className="w-full bg-black text-fugo py-6 rounded-2xl text-lg font-black uppercase tracking-widest hover:bg-fugo hover:text-black transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+               {loading ? "Verifying..." : (
+                <>
+                  <span>Initialize Terminal</span>
+                  <CheckCircle className="w-6 h-6" />
+                </>
+              )}
+            </button>
+          </form>
+        )}
+      </motion.div>
+    </div>
+  );
+};
 
