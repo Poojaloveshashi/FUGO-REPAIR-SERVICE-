@@ -1,28 +1,82 @@
 import { createClient } from '@supabase/supabase-js';
+import { FUEL_SALES_ENABLED } from './config';
 
-// Hardcoded Supabase configuration using project URL and Anon Key fallbacks
-// Direct project configurations:
+// Default Supabase configuration
 // Project URL: https://arierwpjaksxxnmvbqwn.supabase.co
-// Anon Key: ap-southeast-1
+// Publishable Key: sb_publishable__c-Q3k0ibuQMt3_mtYpRNw_Se-8kFbS
 export const HARDCODED_SUPABASE_URL = 'https://arierwpjaksxxnmvbqwn.supabase.co';
-export const HARDCODED_SUPABASE_ANON_KEY = 'ap-southeast-1';
+export const HARDCODED_SUPABASE_ANON_KEY = 'sb_publishable__c-Q3k0ibuQMt3_mtYpRNw_Se-8kFbS';
 
-// URL and Anon Key resolved with hardcoded fallbacks
-const envUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) || 
-               (typeof import.meta !== 'undefined' && (import.meta as any).env?.SUPABASE_URL) || 
-               '';
-const cleanUrl = String(envUrl).trim().replace(/^["']|["']$/g, '');
-export const SUPABASE_URL = cleanUrl.length > 0 
-  ? (cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}.supabase.co`)
-  : HARDCODED_SUPABASE_URL;
+export const DEFAULT_SUPABASE_URL = HARDCODED_SUPABASE_URL;
+export const DEFAULT_SUPABASE_ANON_KEY = HARDCODED_SUPABASE_ANON_KEY;
 
-const envKey = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) || 
-               (typeof import.meta !== 'undefined' && (import.meta as any).env?.SUPABASE_ANON_KEY) || 
-               '';
-const cleanKey = String(envKey).trim().replace(/^["']|["']$/g, '');
-export const SUPABASE_ANON_KEY = cleanKey.length > 0 ? cleanKey : HARDCODED_SUPABASE_ANON_KEY;
+export function isValidSupabaseUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim().replace(/^["']|["']$/g, '');
+  return trimmed.startsWith('https://') && !trimmed.includes('your-project-id');
+}
 
-console.log('[Supabase Client] Initialized with URL:', SUPABASE_URL, 'Anon Key:', SUPABASE_ANON_KEY.slice(0, 6) + '...');
+export function isValidSupabaseKey(key: unknown): key is string {
+  if (typeof key !== 'string') return false;
+  const trimmed = key.trim().replace(/^["']|["']$/g, '');
+  return (
+    trimmed.startsWith('sb_publishable_') ||
+    trimmed.startsWith('eyJ')
+  );
+}
+
+function getValidLocalStorageItem(key: string, validator: (v: unknown) => boolean): string | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const val = window.localStorage.getItem(key);
+    if (!val) return null;
+    if (validator(val)) {
+      return val.trim().replace(/^["']|["']$/g, '');
+    } else {
+      console.warn(`[Supabase] Removing invalid stored value for ${key}:`, val);
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore localStorage access restrictions
+  }
+  return null;
+}
+
+function resolveSupabaseUrl(): string {
+  const storedUrl = getValidLocalStorageItem('supabase_url', isValidSupabaseUrl) ||
+                    getValidLocalStorageItem('VITE_SUPABASE_URL', isValidSupabaseUrl);
+  if (storedUrl) return storedUrl;
+
+  const envUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) || 
+                 (typeof import.meta !== 'undefined' && (import.meta as any).env?.SUPABASE_URL) || 
+                 '';
+  if (isValidSupabaseUrl(envUrl)) {
+    return String(envUrl).trim().replace(/^["']|["']$/g, '');
+  }
+
+  return DEFAULT_SUPABASE_URL;
+}
+
+function resolveSupabaseAnonKey(): string {
+  const storedKey = getValidLocalStorageItem('supabase_anon_key', isValidSupabaseKey) ||
+                    getValidLocalStorageItem('VITE_SUPABASE_ANON_KEY', isValidSupabaseKey) ||
+                    getValidLocalStorageItem('supabase_key', isValidSupabaseKey);
+  if (storedKey) return storedKey;
+
+  const envKey = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) || 
+                 (typeof import.meta !== 'undefined' && (import.meta as any).env?.SUPABASE_ANON_KEY) || 
+                 '';
+  if (isValidSupabaseKey(envKey)) {
+    return String(envKey).trim().replace(/^["']|["']$/g, '');
+  }
+
+  return DEFAULT_SUPABASE_ANON_KEY;
+}
+
+export const SUPABASE_URL = resolveSupabaseUrl();
+export const SUPABASE_ANON_KEY = resolveSupabaseAnonKey();
+
+console.log('[Supabase Client] Initialized with URL:', SUPABASE_URL, 'Key prefix:', SUPABASE_ANON_KEY.slice(0, 10) + '...');
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
@@ -40,6 +94,11 @@ export interface SupabaseOrder {
   id?: string;
   service_type: 'MAINTENANCE';
   status: string;
+  customer_id?: string;
+  technician_id?: string;
+  address?: string;
+  lat?: number | null;
+  lng?: number | null;
   customer_name?: string;
   customer_phone?: string;
   vehicle_name?: string;
@@ -47,6 +106,9 @@ export interface SupabaseOrder {
   vehicle_plate?: string;
   description?: string;
   price?: number;
+  total_amount?: number;
+  payment_status?: string;
+  payment_method?: string;
   parts?: any;
   part_preference?: string;
   repair_complexity?: string;
@@ -64,6 +126,15 @@ export interface SupabaseOrder {
 export async function saveOrderToSupabase(
   request: {
     id: string;
+    customerId?: string;
+    customer_id?: string;
+    userId?: string;
+    technicianId?: string;
+    technician_id?: string;
+    address?: string;
+    pickupAddress?: string;
+    lat?: number | null;
+    lng?: number | null;
     customerName?: string;
     customerPhone?: string;
     vehicleName: string;
@@ -72,6 +143,8 @@ export async function saveOrderToSupabase(
     description: string;
     status: string;
     price?: number;
+    total_amount?: number;
+    totalAmount?: number;
     serviceType?: string;
     partPreference?: string;
     parts?: any[];
@@ -84,10 +157,32 @@ export async function saveOrderToSupabase(
   const isPart = options.isPartRequest || false;
   const orderId = isPart ? `PART-${Date.now()}` : (request.id || `REQ-${Date.now()}`);
 
+  const rawPhone = String(request.customerPhone || request.customer_phone || request.phone || '').replace(/\D/g, '');
+  const customerId = rawPhone.length > 0
+    ? `cust_${rawPhone.length >= 10 ? rawPhone.slice(-10) : rawPhone.padStart(10, '0')}`
+    : (request.customer_id?.startsWith('cust_') ? request.customer_id : (request.customerId?.startsWith('cust_') ? request.customerId : 'cust_0000000000'));
+
+  const technicianId = request.technician_id || request.technicianId || null;
+  const address = request.address || request.pickupAddress || '';
+  const lat = typeof request.lat === 'number' ? request.lat : (request.lat ? Number(request.lat) : null);
+  const lng = typeof request.lng === 'number' ? request.lng : (request.lng ? Number(request.lng) : null);
+
+  const calculatedPrice = isPart && options.partItem?.price
+    ? Number(options.partItem.price)
+    : (request.price ? Number(request.price) : 0);
+  const calculatedTotal = request.total_amount !== undefined && request.total_amount !== null
+    ? Number(request.total_amount)
+    : (request.totalAmount !== undefined && request.totalAmount !== null ? Number(request.totalAmount) : calculatedPrice);
+
   const primaryPayload: Record<string, any> = {
     id: orderId,
     service_type: 'MAINTENANCE',
+    technician_id: technicianId,
     status: isPart ? 'pending' : (request.status || 'pending'),
+    customer_id: customerId,
+    address: address,
+    lat: lat,
+    lng: lng,
     customer_name: request.customerName || 'Customer',
     customer_phone: request.customerPhone || '',
     vehicle_name: request.vehicleName || 'Vehicle',
@@ -96,13 +191,17 @@ export async function saveOrderToSupabase(
     description: isPart && options.partItem
       ? `Part Request: ${options.partItem.name} (${options.partItem.sourcing || 'OEM'}) - For ${request.vehicleName || 'Vehicle'}`
       : (request.description || 'Repair Job Card'),
-    price: isPart && options.partItem?.price
-      ? Number(options.partItem.price)
-      : (request.price ? Number(request.price) : 0),
+    price: calculatedPrice,
+    total_amount: calculatedTotal,
     parts: isPart && options.partItem ? [options.partItem] : (request.parts || []),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+
+  // Rule: Never write payment_status, paid_at or collected_by
+  delete primaryPayload.payment_status;
+  delete primaryPayload.paid_at;
+  delete primaryPayload.collected_by;
 
   try {
     console.log('[Supabase] Inserting order with service_type: MAINTENANCE into orders table:', primaryPayload);
@@ -114,10 +213,19 @@ export async function saveOrderToSupabase(
       const fallbackPayload: Record<string, any> = {
         service_type: 'MAINTENANCE',
         status: primaryPayload.status,
+        customer_id: customerId,
+        address: address,
+        lat: lat,
+        lng: lng,
         description: primaryPayload.description,
         price: primaryPayload.price,
+        total_amount: primaryPayload.total_amount,
         created_at: primaryPayload.created_at,
       };
+
+      delete fallbackPayload.payment_status;
+      delete fallbackPayload.paid_at;
+      delete fallbackPayload.collected_by;
 
       const fallbackResult = await supabase.from('orders').insert([fallbackPayload]).select();
       if (fallbackResult.error) {
@@ -144,12 +252,24 @@ export async function updateOrderStatusInSupabase(
   additionalData: Record<string, any> = {}
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`[Supabase] Updating order status to '${newStatus}' for id: ${orderId}`);
+    console.log(`[Supabase] Updating order status to '${newStatus}' for id: ${orderId}`, additionalData);
     const updatePayload: Record<string, any> = {
       status: newStatus,
       updated_at: new Date().toISOString(),
       ...additionalData,
     };
+
+    if (additionalData.total_amount !== undefined && additionalData.total_amount !== null) {
+      updatePayload.total_amount = Number(additionalData.total_amount);
+    }
+    if (additionalData.price !== undefined && additionalData.price !== null) {
+      updatePayload.price = Number(additionalData.price);
+    }
+
+    // Rule: Never write payment_status, paid_at or collected_by
+    delete updatePayload.payment_status;
+    delete updatePayload.paid_at;
+    delete updatePayload.collected_by;
 
     const { error } = await supabase
       .from('orders')
@@ -158,10 +278,14 @@ export async function updateOrderStatusInSupabase(
 
     if (error) {
       console.warn(`[Supabase] Update status failed with id ${orderId}:`, error.message);
-      // Try updating just status and updated_at
+      // Try updating just status, price, total_amount and updated_at
+      const simplePayload: Record<string, any> = { status: newStatus };
+      if (updatePayload.price !== undefined) simplePayload.price = updatePayload.price;
+      if (updatePayload.total_amount !== undefined) simplePayload.total_amount = updatePayload.total_amount;
+
       const simpleUpdate = await supabase
         .from('orders')
-        .update({ status: newStatus })
+        .update(simplePayload)
         .eq('id', orderId);
       
       if (simpleUpdate.error) {
@@ -189,11 +313,12 @@ export async function fetchMaintenanceOrders(): Promise<any[]> {
 
     if (error) {
       console.warn('[Supabase] Fetch maintenance orders note:', error.message);
-      const general = await supabase.from('orders').select('*').limit(20);
-      return general.data || [];
+      const general = await supabase.from('orders').select('*').limit(50);
+      return (general.data || []).filter((row: any) => row.service_type === 'MAINTENANCE');
     }
 
-    return data || [];
+    // Ignore rows where service_type isn't 'MAINTENANCE' (fuel, parts and transport rows are not repair jobs)
+    return (data || []).filter((row: any) => row.service_type === 'MAINTENANCE');
   } catch (err) {
     console.warn('[Supabase] Could not fetch orders from Supabase:', err);
     return [];
@@ -221,9 +346,19 @@ export function subscribeToOrdersRealtime(callbacks: {
       (payload) => {
         console.log('[Supabase Realtime] Event:', payload.eventType, payload);
         if (payload.eventType === 'INSERT' && callbacks.onInsert) {
-          callbacks.onInsert(payload.new);
+          // Ignore rows where service_type isn't 'MAINTENANCE' (fuel, parts and transport rows are not repair jobs)
+          if (payload.new && payload.new.service_type === 'MAINTENANCE') {
+            callbacks.onInsert(payload.new);
+          } else {
+            console.log('[Supabase Realtime] Ignored non-MAINTENANCE insert:', payload.new?.service_type);
+          }
         } else if (payload.eventType === 'UPDATE' && callbacks.onUpdate) {
-          callbacks.onUpdate(payload.new);
+          // Ignore rows where service_type isn't 'MAINTENANCE' (fuel, parts and transport rows are not repair jobs)
+          if (payload.new && (!payload.new.service_type || payload.new.service_type === 'MAINTENANCE')) {
+            callbacks.onUpdate(payload.new);
+          } else {
+            console.log('[Supabase Realtime] Ignored non-MAINTENANCE update:', payload.new?.service_type);
+          }
         } else if (payload.eventType === 'DELETE' && callbacks.onDelete) {
           callbacks.onDelete(payload.old);
         }

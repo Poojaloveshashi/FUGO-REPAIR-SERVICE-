@@ -8,10 +8,6 @@ export function useOnlineStatus() {
     return true;
   });
 
-  const [simulatedOffline, setSimulatedOffline] = useState<boolean>(() => {
-    return localStorage.getItem('fugo_simulate_warehouse_offline') === 'true';
-  });
-
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -25,18 +21,7 @@ export function useOnlineStatus() {
     };
   }, []);
 
-  const toggleSimulatedOffline = () => {
-    const nextVal = !simulatedOffline;
-    setSimulatedOffline(nextVal);
-    localStorage.setItem('fugo_simulate_warehouse_offline', String(nextVal));
-  };
-
-  const effectiveOnline = isOnline && !simulatedOffline;
-
   return {
-    isOnline: effectiveOnline,
-    isRealOnline: isOnline,
-    isSimulatedOffline: simulatedOffline,
-    toggleSimulatedOffline,
+    isOnline,
   };
 }

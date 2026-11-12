@@ -38,6 +38,8 @@ import {
   subscribeToOrdersRealtime,
   testSupabaseConnection
 } from './supabase';
+import type { Session } from '@supabase/supabase-js';
+import { FUEL_SALES_ENABLED } from './config';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { WarehouseConnectivityBanner } from './components/WarehouseConnectivityBanner';
@@ -96,6 +98,12 @@ type Status = 'pending' | 'transporting' | 'warehouse' | 'repairing' | 'ready' |
 interface RepairRequest {
   id: string;
   userId: string;
+  customerId?: string;
+  customer_id?: string;
+  address?: string;
+  pickupAddress?: string;
+  lat?: number | null;
+  lng?: number | null;
   customerName?: string;
   customerPhone?: string;
   vehicleName: string;
@@ -112,6 +120,12 @@ interface RepairRequest {
   serviceType: ServiceType;
   partPreference: PartPreference;
   price?: number;
+  total_amount?: number;
+  totalAmount?: number;
+  payment_status?: string;
+  paymentStatus?: string;
+  payment_method?: string;
+  paymentMethod?: string;
   servicePrice?: number;
   repairPrice?: number;
   oemPrice?: number;
@@ -158,8 +172,8 @@ export default function App() {
   const [permissionsGranted, setPermissionsGranted] = useState(true);
   const [selectedSlots, setSelectedSlots] = useState<any[]>([]);
   const [isShiftStarted, setIsShiftStarted] = useState(false);
-  const [isMockAuthenticated, setIsMockAuthenticated] = useState(true);
-  const [mockPhone, setMockPhone] = useState('9845330364');
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
 
   const [bookedSlots, setBookedSlots] = useState<any[]>([]);
   const [viewingDoc, setViewingDoc] = useState<string | null>(null);
@@ -171,66 +185,32 @@ export default function App() {
   });
   const [selectedRequest, setSelectedRequest] = useState<RepairRequest | null>(null);
 
+  // Supabase Auth session listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      setSession(currentSession);
+      setSessionLoading(false);
+    }).catch((err) => {
+      console.error('[Supabase Auth] Session load error:', err);
+      setSessionLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      setSession(currentSession);
+      setSessionLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Mirror requests to offline storage so industrial warehouse dead zones have instant data
   useEffect(() => {
     if (requests.length > 0) {
       cacheRepairRequestsLocally(requests);
     }
   }, [requests]);
-  
-  // Seed initial mock data for analysis
-  useEffect(() => {
-    if (requests.length === 0 && (profile?.role === 'technician' || isMockAuthenticated)) {
-      const mockRequests: RepairRequest[] = [
-        {
-          id: 'REQ-DEMO-001',
-          userId: 'demo-user',
-          customerName: 'Rahul Sharma',
-          customerPhone: '9876543210',
-          vehicleName: 'Mahindra XUV700',
-          rcNumber: 'TS07HE1234',
-          vehiclePlate: 'TS 07 HE 1234',
-          make: 'Mahindra',
-          model: 'XUV700',
-          year: '2023',
-          fuelType: 'Diesel',
-          description: 'Engine making rattling noise and brake pads feel soft.',
-          status: 'repairing',
-          serviceType: 'offline',
-          partPreference: 'brand',
-          price: 4500,
-          repairPrice: 1500,
-          servicePrice: 500,
-          parts: [
-            { name: 'Brake Pads (Front)', price: 2500, sourcing: 'brand' }
-          ],
-          repairStartTime: new Date(Date.now() - 3600000), // Started 1 hour ago
-          createdAt: new Date(Date.now() - 86400000), // Created yesterday
-          updatedAt: new Date()
-        },
-        {
-          id: 'REQ-DEMO-002',
-          userId: 'demo-user',
-          customerName: 'Priya Reddy',
-          customerPhone: '9123456789',
-          vehicleName: 'Tata Nexon EV',
-          rcNumber: 'TS08JK5678',
-          vehiclePlate: 'TS 08 JK 5678',
-          make: 'Tata',
-          model: 'Nexon EV',
-          year: '2022',
-          fuelType: 'Electric',
-          description: 'Software update required and minor scratch on left door.',
-          status: 'pending',
-          serviceType: 'online',
-          partPreference: 'third-party',
-          createdAt: new Date(Date.now() - 172800000), // Created 2 days ago
-          updatedAt: new Date()
-        }
-      ];
-      setRequests(mockRequests);
-    }
-  }, [profile, requests.length]);
 
   const [slots, setSlots] = useState<any[]>([]); // To be populated
   const [earnings, setEarnings] = useState<any[]>([]); // To be populated
@@ -300,6 +280,7 @@ export default function App() {
   }, [user, profile]);
 
   const [supabaseStatus, setSupabaseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [supabaseErrorMessage, setSupabaseErrorMessage] = useState<string | null>(null);
   const [supabaseLatency, setSupabaseLatency] = useState<number | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
   const [lastSyncedEvent, setLastSyncedEvent] = useState<string | null>(null);
@@ -314,10 +295,12 @@ export default function App() {
       
       if (test.connected) {
         setSupabaseStatus('connected');
+        setSupabaseErrorMessage(null);
         setLastSyncedEvent(`Supabase Connected • orders table ready (${test.latencyMs}ms)`);
       } else {
         setSupabaseStatus('error');
-        setLastSyncedEvent(`Supabase Notice: ${test.message}`);
+        setSupabaseErrorMessage(test.message);
+        setLastSyncedEvent(`Supabase Error: ${test.message}`);
       }
 
       // Fetch existing orders with service_type: 'MAINTENANCE'
@@ -328,10 +311,20 @@ export default function App() {
           const existingIds = new Set(prev.map(p => p.id));
           const incoming: RepairRequest[] = [];
           for (const o of orders) {
+            // Ignore rows where service_type isn't 'MAINTENANCE' (fuel, parts and transport rows are not repair jobs)
+            if (o.service_type && o.service_type !== 'MAINTENANCE') {
+              continue;
+            }
             if (!existingIds.has(o.id)) {
               incoming.push({
                 id: o.id,
-                userId: o.user_id || 'supabase-order',
+                userId: o.customer_id || o.user_id || 'supabase-order',
+                customerId: o.customer_id || o.user_id || 'supabase-order',
+                customer_id: o.customer_id || o.user_id || 'supabase-order',
+                address: o.address || '',
+                pickupAddress: o.address || '',
+                lat: typeof o.lat === 'number' ? o.lat : (o.lat ? Number(o.lat) : null),
+                lng: typeof o.lng === 'number' ? o.lng : (o.lng ? Number(o.lng) : null),
                 customerName: o.customer_name || 'Customer',
                 customerPhone: o.customer_phone || '',
                 vehicleName: o.vehicle_name || 'Vehicle',
@@ -342,6 +335,9 @@ export default function App() {
                 serviceType: (o.service_type === 'MAINTENANCE' || o.serviceType === 'online' ? 'online' : 'offline') as ServiceType,
                 partPreference: (o.part_preference as PartPreference) || 'brand',
                 price: o.price ? Number(o.price) : undefined,
+                total_amount: o.total_amount !== undefined && o.total_amount !== null ? Number(o.total_amount) : (o.price ? Number(o.price) : undefined),
+                payment_status: o.payment_status || 'PENDING',
+                payment_method: o.payment_method,
                 parts: Array.isArray(o.parts) ? o.parts : [],
                 repairComplexity: o.repair_complexity,
                 estimatedTiming: o.estimated_timing,
@@ -373,19 +369,33 @@ export default function App() {
       onConnectionChange: (status) => {
         if (status === 'SUBSCRIBED') {
           setSupabaseStatus('connected');
+          setSupabaseErrorMessage(null);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           setSupabaseStatus('error');
+          setSupabaseErrorMessage(`Realtime channel error (${status})`);
         }
       },
       onInsert: (newOrder) => {
         console.log('[Supabase Realtime INSERT received]', newOrder);
+        // Ignore rows whose service_type is not MAINTENANCE
+        if (newOrder.service_type !== 'MAINTENANCE') {
+          console.log('[Supabase Realtime] Ignoring non-MAINTENANCE insert:', newOrder.service_type);
+          return;
+        }
+
         setLastSyncedEvent(`Order Synced: ${newOrder.id} [${newOrder.status || 'pending'}]`);
         // Map into RepairRequest
         setRequests(prev => {
           if (prev.some(r => r.id === newOrder.id)) return prev;
           const mapped: RepairRequest = {
             id: newOrder.id || `REQ-${Date.now()}`,
-            userId: newOrder.user_id || 'supabase-order',
+            userId: newOrder.customer_id || newOrder.user_id || 'supabase-order',
+            customerId: newOrder.customer_id || newOrder.user_id || 'supabase-order',
+            customer_id: newOrder.customer_id || newOrder.user_id || 'supabase-order',
+            address: newOrder.address || '',
+            pickupAddress: newOrder.address || '',
+            lat: typeof newOrder.lat === 'number' ? newOrder.lat : (newOrder.lat ? Number(newOrder.lat) : null),
+            lng: typeof newOrder.lng === 'number' ? newOrder.lng : (newOrder.lng ? Number(newOrder.lng) : null),
             customerName: newOrder.customer_name || 'Customer',
             customerPhone: newOrder.customer_phone || '',
             vehicleName: newOrder.vehicle_name || 'Vehicle',
@@ -396,6 +406,9 @@ export default function App() {
             serviceType: 'offline',
             partPreference: (newOrder.part_preference as PartPreference) || 'brand',
             price: newOrder.price ? Number(newOrder.price) : undefined,
+            total_amount: newOrder.total_amount !== undefined && newOrder.total_amount !== null ? Number(newOrder.total_amount) : (newOrder.price ? Number(newOrder.price) : undefined),
+            payment_status: newOrder.payment_status || 'PENDING',
+            payment_method: newOrder.payment_method,
             parts: Array.isArray(newOrder.parts) ? newOrder.parts : [],
             repairComplexity: newOrder.repair_complexity,
             estimatedTiming: newOrder.estimated_timing,
@@ -407,6 +420,12 @@ export default function App() {
       },
       onUpdate: (updatedOrder) => {
         console.log('[Supabase Realtime UPDATE received]', updatedOrder);
+        // Ignore rows where service_type isn't 'MAINTENANCE' (fuel, parts and transport rows are not repair jobs)
+        if (updatedOrder && updatedOrder.service_type && updatedOrder.service_type !== 'MAINTENANCE') {
+          console.log('[Supabase Realtime] Ignoring non-MAINTENANCE update:', updatedOrder.service_type);
+          return;
+        }
+
         setLastSyncedEvent(`Live Status Sync: ${updatedOrder.id} -> ${updatedOrder.status}`);
         setRequests(prev =>
           prev.map(r => {
@@ -415,6 +434,9 @@ export default function App() {
                 ...r,
                 status: (updatedOrder.status as Status) || r.status,
                 price: updatedOrder.price !== undefined ? Number(updatedOrder.price) : r.price,
+                total_amount: updatedOrder.total_amount !== undefined && updatedOrder.total_amount !== null ? Number(updatedOrder.total_amount) : (updatedOrder.price !== undefined ? Number(updatedOrder.price) : r.total_amount),
+                payment_status: updatedOrder.payment_status || r.payment_status,
+                payment_method: updatedOrder.payment_method || r.payment_method,
                 parts: Array.isArray(updatedOrder.parts) ? updatedOrder.parts : r.parts,
                 estimatedTiming: updatedOrder.estimated_timing || r.estimatedTiming,
                 repairComplexity: updatedOrder.repair_complexity || r.repairComplexity,
@@ -430,6 +452,9 @@ export default function App() {
               ...curr,
               status: (updatedOrder.status as Status) || curr.status,
               price: updatedOrder.price !== undefined ? Number(updatedOrder.price) : curr.price,
+              total_amount: updatedOrder.total_amount !== undefined && updatedOrder.total_amount !== null ? Number(updatedOrder.total_amount) : (updatedOrder.price !== undefined ? Number(updatedOrder.price) : curr.total_amount),
+              payment_status: updatedOrder.payment_status || curr.payment_status,
+              payment_method: updatedOrder.payment_method || curr.payment_method,
               parts: Array.isArray(updatedOrder.parts) ? updatedOrder.parts : curr.parts,
               estimatedTiming: updatedOrder.estimated_timing || curr.estimatedTiming,
               repairComplexity: updatedOrder.repair_complexity || curr.repairComplexity,
@@ -454,9 +479,15 @@ export default function App() {
 
   // Creation handler: Saves to Supabase orders table with service_type: 'MAINTENANCE' or queues offline
   const handleCreateRequest = async (newReq: RepairRequest) => {
+    const techReq: RepairRequest = {
+      ...newReq,
+      technician_id: session?.user?.id || newReq.technician_id,
+      technicianId: session?.user?.id || newReq.technicianId
+    };
+
     // 1. Optimistic local update & local storage cache
     setRequests(prev => {
-      const next = [newReq, ...prev.filter(r => r.id !== newReq.id)];
+      const next = [techReq, ...prev.filter(r => r.id !== techReq.id)];
       cacheRepairRequestsLocally(next);
       return next;
     });
@@ -464,27 +495,27 @@ export default function App() {
     // 2. Persist to Supabase orders table or queue if in low-connectivity warehouse
     if (isOnline) {
       try {
-        const result = await saveOrderToSupabase(newReq);
+        const result = await saveOrderToSupabase(techReq);
         if (result.success) {
-          setLastSyncedEvent(`Saved Job Card to Supabase: ${newReq.id}`);
+          setLastSyncedEvent(`Saved Job Card: ${techReq.id}`);
         } else {
-          queueOfflineAction({ type: 'CREATE_JOB', payload: newReq });
+          queueOfflineAction({ type: 'CREATE_JOB', payload: techReq });
           setLastSyncedEvent(`Warehouse dead zone detected: Job Card queued in outbox.`);
         }
       } catch (err) {
-        queueOfflineAction({ type: 'CREATE_JOB', payload: newReq });
+        queueOfflineAction({ type: 'CREATE_JOB', payload: techReq });
         setLastSyncedEvent(`Network timeout: Job Card queued in warehouse outbox.`);
       }
     } else {
-      queueOfflineAction({ type: 'CREATE_JOB', payload: newReq });
+      queueOfflineAction({ type: 'CREATE_JOB', payload: techReq });
       setLastSyncedEvent(`Warehouse Offline Mode: Job Card cached & queued for sync.`);
     }
 
     // 3. Optional Firestore persist if online
     if (isOnline && auth.currentUser) {
       try {
-        await setDoc(doc(db, 'repair_requests', newReq.id), {
-          ...newReq,
+        await setDoc(doc(db, 'repair_requests', techReq.id), {
+          ...techReq,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -508,7 +539,9 @@ export default function App() {
     if (isOnline) {
       try {
         const result = await updateOrderStatusInSupabase(updatedReq.id, updatedReq.status, {
+          technician_id: session?.user?.id,
           price: updatedReq.price,
+          total_amount: updatedReq.total_amount,
           parts: updatedReq.parts,
           estimated_timing: updatedReq.estimatedTiming,
           repair_complexity: updatedReq.repairComplexity,
@@ -607,13 +640,15 @@ export default function App() {
     }
   };
 
-  const login = async () => {
-    await signInWithPopup(auth, new GoogleAuthProvider());
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('[Supabase Auth] Sign out error:', err);
+    }
   };
 
-  const logout = () => signOut(auth);
-
-  if (loading) {
+  if (sessionLoading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-fugo-zinc">
         <motion.div 
@@ -626,34 +661,33 @@ export default function App() {
     );
   }
 
-  const activeProfile = profile || (isMockAuthenticated ? { 
-    uid: 'mock-' + mockPhone, 
-    email: mockPhone + '@fugo.internal', 
-    displayName: 'Fugo Tech ' + mockPhone.slice(-4), 
-    role: 'technician' as Role,
-    phoneNumber: mockPhone 
-  } : { uid: 'guest', email: '', displayName: 'Guest User', role: 'customer' as Role });
-
-  if (!user && !isMockAuthenticated) {
-    return (
-      <LoginView 
-        onLogin={(phone) => {
-          setMockPhone(phone);
-          setIsMockAuthenticated(true);
-        }} 
-      />
-    );
+  if (!session) {
+    return <LoginView />;
   }
+
+  const techId = session.user.id;
+  const techEmail = session.user.email || '';
+  const techNamePrefix = techEmail.split('@')[0] || 'Technician';
+  const techDisplayName = session.user.user_metadata?.displayName || 
+    (techNamePrefix.charAt(0).toUpperCase() + techNamePrefix.slice(1));
+
+  const activeProfile: UserProfile = { 
+    uid: techId, 
+    email: techEmail, 
+    displayName: techDisplayName, 
+    role: 'technician' as Role,
+    phoneNumber: session.user.phone || '' 
+  };
 
   return (
     <div className="min-h-screen bg-fugo-zinc flex flex-col m-0 font-sans">
-      {/* Industrial Warehouse Low-Connectivity & Offline Banner */}
+      {/* Industrial Warehouse Connectivity Banner */}
       <WarehouseConnectivityBanner 
         isOnline={isOnline}
-        isSimulatedOffline={isSimulatedOffline}
-        onToggleSimulateOffline={toggleSimulatedOffline}
+        supabaseStatus={supabaseStatus}
+        supabaseErrorMessage={supabaseErrorMessage}
         onSyncCompleted={() => {
-          setLastSyncedEvent('Outbox Synced Successfully to Supabase');
+          setLastSyncedEvent('Station orders synchronized');
         }}
       />
 
@@ -668,10 +702,12 @@ export default function App() {
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className={cn(
                   "w-1.5 h-1.5 rounded-full",
-                  isOnline && supabaseStatus === 'connected' ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
+                  isOnline && supabaseStatus === 'connected' 
+                    ? "bg-emerald-500 animate-pulse" 
+                    : "bg-amber-500"
                 )} />
-                <span className="text-[8px] font-mono font-bold text-slate-500">
-                  {isOnline ? 'Supabase: orders [MAINTENANCE]' : 'Offline: Workbox Cache Active'}
+                <span className="text-[8px] font-mono font-bold text-slate-500 truncate max-w-[200px]">
+                  {isOnline ? 'Station Live' : 'Offline Mode Active'}
                 </span>
               </div>
             </div>
@@ -691,25 +727,23 @@ export default function App() {
             <h1 className="text-4xl font-black tracking-tighter leading-none italic text-white">fugo repair & service</h1>
             <div className="h-1 w-full bg-fugo mt-2"></div>
             
-            {/* Supabase Realtime Indicator */}
+            {/* Realtime Station Status Indicator */}
             <div className="mt-4 p-3 bg-white/5 rounded-2xl border border-white/10">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <span className={cn(
                     "w-2 h-2 rounded-full",
-                    isOnline && supabaseStatus === 'connected' ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
+                    isOnline && supabaseStatus === 'connected' 
+                      ? "bg-emerald-400 animate-pulse" 
+                      : "bg-amber-400"
                   )} />
                   <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
-                    {isOnline ? 'Supabase Live' : 'Warehouse Cache'}
+                    {isOnline ? 'Station Live' : 'Offline Storage'}
                   </span>
                 </div>
-                <span className="text-[8px] font-mono text-white/40">orders</span>
+                <span className="text-[8px] font-mono text-white/40">Active Bay</span>
               </div>
-              <p className="text-[9px] font-mono text-white/60 truncate">arierwpjaksxxnmvbqwn</p>
-              <div className="mt-1 flex items-center justify-between text-[8px] font-bold text-white/40 uppercase">
-                <span>Service Type</span>
-                <span className="text-fugo font-black">MAINTENANCE</span>
-              </div>
+              <p className="text-[10px] font-bold text-white/60">Automated Dispatch Ready</p>
             </div>
 
             {/* In-App PWA Installation Prompt */}
@@ -727,29 +761,17 @@ export default function App() {
         
         <div className="mt-auto hidden md:block pt-6 border-t-4 border-fugo">
           <div className="mb-4">
-            <p className="text-[10px] font-black uppercase tracking-widest text-fugo/50">Authorized User</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-fugo/50">Authorized Technician</p>
             <p className="text-sm font-bold truncate">{activeProfile.displayName}</p>
+            <p className="text-[10px] text-white/40 font-mono truncate">{activeProfile.email}</p>
           </div>
-          {user || isMockAuthenticated ? (
-            <button 
-              onClick={() => {
-                logout();
-                setIsMockAuthenticated(false);
-              }}
-              className="flex items-center gap-3 w-full px-4 py-3 bg-fugo text-fugo-dark hover:bg-white transition-all font-black uppercase text-xs"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Log out</span>
-            </button>
-          ) : (
-            <button 
-              onClick={login}
-              className="flex items-center gap-3 w-full px-4 py-3 bg-fugo text-fugo-dark hover:bg-white transition-all font-black uppercase text-xs"
-            >
-              <UserIcon className="w-4 h-4" />
-              <span>Sign In</span>
-            </button>
-          )}
+          <button 
+            onClick={logout}
+            className="flex items-center gap-3 w-full px-4 py-3 bg-fugo text-fugo-dark hover:bg-white transition-all font-black uppercase text-xs"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Log out</span>
+          </button>
         </div>
       </nav>
 
@@ -1152,17 +1174,39 @@ const ActiveRepairCard: React.FC<{ request: RepairRequest, onClick: () => void }
             )}
           </div>
           
-          <div className="mt-4 space-y-1">
-            <p className="text-[9px] font-black uppercase tracking-widest opacity-30">Client: {request.customerName || 'Standard User'}</p>
+          <div className="mt-4 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[9px] font-black uppercase tracking-widest opacity-30">Client: {request.customerName || 'Standard User'}</p>
+              <span className={cn(
+                "px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded border",
+                request.payment_status?.toUpperCase() === 'PAID'
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                  : "bg-amber-50 text-amber-700 border-amber-300"
+              )}>
+                {request.payment_status?.toUpperCase() === 'PAID'
+                  ? `Paid ₹${request.total_amount ?? request.price ?? 0} via ${request.payment_method || 'COD'}`
+                  : 'Unpaid'}
+              </span>
+            </div>
             {request.description && (
               <p className="text-[10px] font-bold opacity-60 line-clamp-1 italic">"{request.description}"</p>
             )}
           </div>
         </div>
         <div className="text-right">
-          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Estimate</p>
+          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">
+            {request.status === 'ready' || request.status === 'completed' ? 'Final Bill' : 'Estimate'}
+          </p>
           <p className="text-xl font-black italic tracking-tighter text-fugo-dark">
-            {request.price ? `₹${request.price}` : 'Pending Quote'}
+            {(request.total_amount || request.price) ? `₹${request.total_amount || request.price}` : 'Pending Quote'}
+          </p>
+          <p className={cn(
+            "text-[9px] font-black uppercase tracking-widest mt-1",
+            request.payment_status?.toUpperCase() === 'PAID' ? "text-emerald-600" : "text-amber-600"
+          )}>
+            {request.payment_status?.toUpperCase() === 'PAID'
+              ? `Paid ₹${request.total_amount ?? request.price ?? 0} via ${request.payment_method || 'COD'}`
+              : 'Unpaid'}
           </p>
         </div>
       </div>
@@ -1180,7 +1224,7 @@ const ActiveRepairCard: React.FC<{ request: RepairRequest, onClick: () => void }
           <div className="w-6 h-6 bg-orange-50 rounded-lg flex items-center justify-center">
             <Zap className="w-3 h-3 text-orange-600" />
           </div>
-          <span className="text-[10px] font-black uppercase opacity-60">Fugo Fuel App Order</span>
+          <span className="text-[10px] font-black uppercase opacity-60">Fugo Order</span>
         </div>
         <ChevronRight className="w-4 h-4 opacity-20 group-hover:translate-x-1 transition-transform" />
       </div>
@@ -1257,106 +1301,35 @@ const HomeView: React.FC<{
         </div>
       </div>
 
-      {/* Supabase Live Real-Time Card */}
+      {/* Service Station Operations Bay Card */}
       <div className="mx-6 p-5 bg-black text-white rounded-[2rem] border-2 border-emerald-500/40 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
-        <div className="flex items-start justify-between gap-3 relative z-10">
+        <div className="flex items-start sm:items-center justify-between gap-4 relative z-10">
           <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-1.5">
-              <div className="relative flex items-center justify-center">
-                <span className={cn(
-                  "w-2.5 h-2.5 rounded-full",
-                  isOnline && supabaseStatus === 'connected' ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
-                )} />
-              </div>
-              <span className="text-xs font-black uppercase tracking-wider text-emerald-400">
-                Supabase Live Connection
-              </span>
-              <span className="bg-emerald-500/20 text-emerald-300 text-[8px] font-mono px-2 py-0.5 rounded-md font-bold">
-                table: orders
-              </span>
-              {supabaseLatency !== null && (
-                <span className="bg-white/10 text-emerald-400 text-[8px] font-mono px-1.5 py-0.5 rounded font-bold">
-                  {supabaseLatency}ms
-                </span>
-              )}
-            </div>
-            
-            <p className="text-[10px] font-mono text-white/70">
-              Filter: <span className="text-fugo font-bold">service_type = 'MAINTENANCE'</span> • Ref: <span className="text-emerald-400 font-bold">arierwpjaksxxnmvbqwn</span>
-            </p>
-            <p className="text-[9px] font-mono text-white/50 mt-1 truncate">
-              {lastSyncedEvent || `Realtime sync channel active • ${requests.length} jobs synced`}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {onVerifyConnection && (
-              <button
-                onClick={onVerifyConnection}
-                disabled={isTestingConnection}
-                title="Test Supabase connection"
-                className="flex items-center gap-1 px-2.5 py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold rounded-xl transition-all active:scale-95 disabled:opacity-50"
-              >
-                <RefreshCw className={cn("w-3.5 h-3.5 text-emerald-400", isTestingConnection && "animate-spin")} />
-                <span className="hidden sm:inline">{isTestingConnection ? 'Testing...' : 'Test Sync'}</span>
-              </button>
-            )}
-            
-            <button
-              onClick={onStartJob}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Job Card</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Industrial Warehouse Offline Cache (Workbox SW) */}
-      <div className="mx-6 p-5 bg-fugo-dark text-white rounded-[2rem] border-2 border-fugo/40 shadow-xl relative overflow-hidden">
-        <div className="flex items-start justify-between gap-3">
-          <div>
             <div className="flex items-center gap-2 mb-1.5">
               <span className={cn(
                 "w-2.5 h-2.5 rounded-full",
-                isOnline ? "bg-emerald-400" : "bg-amber-400 animate-pulse"
+                isOnline ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
               )} />
-              <span className="text-xs font-black uppercase tracking-wider text-fugo">
-                Industrial Warehouse Offline Cache
+              <span className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                {isOnline ? 'Service Station Live' : 'Offline Storage Active'}
               </span>
-              <span className="bg-fugo/20 text-fugo text-[8px] font-mono px-2 py-0.5 rounded-md font-bold">
-                WORKBOX SW
+              <span className="bg-white/10 text-white/80 text-[9px] font-mono px-2 py-0.5 rounded-md font-bold">
+                {requests.filter(r => r.status === 'repairing' || r.status === 'warehouse').length} in Bay
               </span>
             </div>
-            <p className="text-[10px] text-white/80 leading-relaxed font-mono">
-              {isOnline
-                ? `Workbox precaching & runtime caching active (NetworkFirst 3s timeout). Cached ${requests.length} critical repair records & parts for dead zones.`
-                : `Active in low-connectivity warehouse mode. Serving ${requests.length} cached repair records directly from local storage.`}
+            <p className="text-xs text-white/70 font-medium">
+              Maintenance jobs and vehicle inspections. Set the required final bill when marking ready for delivery.
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-1 bg-white/10 text-[9px] font-mono uppercase text-white/70">
-                Network: <strong className={isOnline ? "text-emerald-400" : "text-amber-400"}>{isOnline ? 'ONLINE' : 'DEAD ZONE / OFFLINE'}</strong>
-              </span>
-              <span className="px-2.5 py-1 bg-white/10 text-[9px] font-mono uppercase text-white/70">
-                Cache: <strong>{requests.length} REPAIR LOGS</strong>
-              </span>
-            </div>
           </div>
 
-          {onToggleSimulateOffline && (
-            <button
-              onClick={onToggleSimulateOffline}
-              className={`flex-shrink-0 px-3 py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all border ${
-                isSimulatedOffline
-                  ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
-                  : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
-              }`}
-            >
-              {isSimulatedOffline ? 'Resume Online' : 'Simulate Dead Zone'}
-            </button>
-          )}
+          <button
+            onClick={onStartJob}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-fugo hover:bg-white text-black text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 flex-shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Job Card</span>
+          </button>
         </div>
       </div>
 
@@ -1947,54 +1920,16 @@ const ProfileView: React.FC<{ profile: UserProfile, user: User | null, onLogin: 
           </div>
         </div>
 
-        {/* Role Switcher for Developer/Tester */}
-        <div className="mx-6 px-6 py-4 bg-fugo-zinc rounded-[2rem] border-2 border-dashed border-black/10">
-          <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-4">Internal Station Toggle (For Testing)</p>
-          <div className="flex gap-2">
-            {(['customer', 'technician'] as Role[]).map(r => (
-              <button 
-                key={r}
-                onClick={async () => {
-                  if (!user) return;
-                  const profileRef = doc(db, 'users', user.uid);
-                  try {
-                    await setDoc(profileRef, { ...profile, role: r });
-                  } catch (err) {
-                    handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
-                  }
-                }}
-                className={cn(
-                  "px-4 py-2 text-[10px] rounded-xl font-black uppercase border-2 transition-all",
-                  profile.role === r ? "bg-black text-white border-black" : "bg-white border-black/10 opacity-40"
-                )}
-              >
-                Set as {r}
-              </button>
-            ))}
-          </div>
+        {/* Log Out */}
+        <div className="px-6">
+          <button 
+            onClick={onLogout}
+            className="w-full py-5 flex items-center justify-center gap-3 bg-red-50 text-red-600 rounded-3xl font-black uppercase text-xs hover:bg-black hover:text-white transition-all border border-red-100 shadow-sm"
+          >
+            <LogOut className="w-4 h-4" />
+            Log out
+          </button>
         </div>
-
-        {user ? (
-          <div className="px-6">
-            <button 
-              onClick={onLogout}
-              className="w-full py-5 flex items-center justify-center gap-3 bg-red-50 text-red-600 rounded-3xl font-black uppercase text-xs hover:bg-black hover:text-white transition-all border border-red-100"
-            >
-              <LogOut className="w-4 h-4" />
-              Logout
-            </button>
-          </div>
-        ) : (
-          <div className="px-6">
-            <button 
-              onClick={onLogin}
-              className="w-full py-5 flex items-center justify-center gap-3 bg-black text-white rounded-3xl font-black uppercase text-xs hover:bg-fugo hover:text-black transition-all"
-            >
-              <UserIcon className="w-4 h-4" />
-              Authenticate
-            </button>
-          </div>
-        )}
       </div>
     </motion.div>
   );
@@ -2450,9 +2385,21 @@ function RepairCard({ request, onClick }: { request: RepairRequest, onClick: () 
               <span className="text-fugo text-sm">{'★'.repeat(request.rating)}</span>
             )}
           </div>
-          {request.customerName && (
-            <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mt-2">Client: {request.customerName}</p>
-          )}
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            {request.customerName && (
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Client: {request.customerName}</p>
+            )}
+            <span className={cn(
+              "px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded border",
+              request.payment_status?.toUpperCase() === 'PAID'
+                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                : "bg-amber-50 text-amber-700 border-amber-300"
+            )}>
+              {request.payment_status?.toUpperCase() === 'PAID'
+                ? `Paid ₹${request.total_amount ?? request.price ?? 0} via ${request.payment_method || 'COD'}`
+                : 'Unpaid'}
+            </span>
+          </div>
         </div>
       </div>
       
@@ -2466,12 +2413,27 @@ function RepairCard({ request, onClick }: { request: RepairRequest, onClick: () 
           <p className="text-sm font-black uppercase italic">{request.partPreference === 'brand' ? 'OEM' : '3rd'}</p>
         </div>
         <div className="hidden lg:block text-right">
-          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Price</p>
-          <p className="text-sm font-black uppercase italic text-fugo">{request.price ? `₹${request.price}` : 'Estimating'}</p>
+          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">
+            {request.status === 'ready' || request.status === 'completed' ? 'Final Bill' : 'Price'}
+          </p>
+          <p className="text-sm font-black uppercase italic text-fugo">
+            {(request.total_amount || request.price) ? `₹${request.total_amount || request.price}` : 'Estimating'}
+          </p>
+        </div>
+        <div className="hidden lg:block text-right">
+          <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Payment</p>
+          <p className={cn(
+            "text-sm font-black uppercase italic",
+            request.payment_status?.toUpperCase() === 'PAID' ? "text-green-600" : "text-amber-600"
+          )}>
+            {request.payment_status?.toUpperCase() === 'PAID'
+              ? `Paid ₹${request.total_amount ?? request.price ?? 0} via ${request.payment_method || 'COD'}`
+              : 'Unpaid'}
+          </p>
         </div>
         <div className="hidden lg:block text-right">
           <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Origin</p>
-          <p className="text-sm font-black uppercase italic text-orange-600">Fuel App</p>
+          <p className="text-sm font-black uppercase italic text-orange-600">Fugo Order</p>
         </div>
         <div className={cn("px-6 py-2 font-black uppercase tracking-tighter text-xl flex flex-col items-center", config.bg, config.color)}>
           <span>{request.status}</span>
@@ -2498,10 +2460,15 @@ function RepairForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     vehicleName: '',
     customerName: profile?.displayName || '',
     customerPhone: profile?.phoneNumber || '',
+    pickupAddress: '',
+    lat: null as number | null,
+    lng: null as number | null,
     rcNumber: '',
     vehiclePlate: '',
     make: '',
@@ -2517,6 +2484,55 @@ function RepairForm({
     photoUrl: '',
     parts: [] as { name: string, sourcing: PartPreference }[]
   });
+
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus('Geolocation is not supported by your browser');
+      return;
+    }
+    setLocating(true);
+    setLocationStatus('Acquiring GPS coordinates...');
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const coordsStr = `Lat: ${latitude.toFixed(5)}, Lng: ${longitude.toFixed(5)}`;
+        setFormData(prev => ({
+          ...prev,
+          lat: latitude,
+          lng: longitude,
+          pickupAddress: prev.pickupAddress ? prev.pickupAddress : coordsStr
+        }));
+        setLocationStatus(`GPS acquired: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+
+        // Reverse geocode to get a human-readable street address if possible
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.display_name) {
+              setFormData(prev => ({
+                ...prev,
+                pickupAddress: data.display_name,
+                lat: latitude,
+                lng: longitude
+              }));
+              setLocationStatus('Location found');
+            }
+          }
+        } catch {
+          // fallback keeps coordinates
+        } finally {
+          setLocating(false);
+        }
+      },
+      (err) => {
+        console.warn('Geolocation lookup error:', err);
+        setLocationStatus('Could not fetch location. Please enter manually.');
+        setLocating(false);
+      },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
+  };
 
   const addPartSuggestion = () => {
     setFormData(prev => ({
@@ -2614,9 +2630,19 @@ function RepairForm({
     setLoading(true);
     try {
       const requestId = `REQ-${Date.now()}`;
+      const rawPhone = String(formData.customerPhone || '').replace(/\D/g, '');
+      const last10 = rawPhone.length >= 10 ? rawPhone.slice(-10) : (rawPhone ? rawPhone.padStart(10, '0') : '0000000000');
+      const customerId = `cust_${last10}`;
+
       const newRequest: RepairRequest = {
         id: requestId,
-        userId: auth.currentUser?.uid || profile?.uid || 'tech-user',
+        userId: customerId,
+        customerId: customerId,
+        customer_id: customerId,
+        address: formData.pickupAddress,
+        pickupAddress: formData.pickupAddress,
+        lat: formData.lat,
+        lng: formData.lng,
         customerName: formData.customerName,
         customerPhone: formData.customerPhone,
         vehicleName: formData.vehicleName,
@@ -2707,6 +2733,50 @@ function RepairForm({
               onChange={e => setFormData({...formData, customerPhone: e.target.value})}
             />
           </div>
+        </div>
+
+        {/* Pickup Address & Geolocation Field */}
+        <div className="bg-fugo-zinc border-4 border-black p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <label className={labelClass}>Pickup Address</label>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-black/60">
+                Specify vehicle pickup or workshop location
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleUseMyLocation}
+              disabled={locating}
+              className="bg-black text-fugo hover:bg-fugo hover:text-black transition-all px-5 py-3 flex items-center justify-center gap-2 font-black uppercase text-xs border-2 border-black disabled:opacity-50"
+            >
+              <MapPin className={cn("w-4 h-4", locating && "animate-bounce text-fugo")} />
+              <span>{locating ? "Locating..." : "Use My Location"}</span>
+            </button>
+          </div>
+
+          <div className="relative">
+            <input
+              placeholder="e.g. Plot 42, Gachibowli Financial District, Hyderabad"
+              className={inputClass}
+              value={formData.pickupAddress}
+              onChange={e => setFormData({ ...formData, pickupAddress: e.target.value })}
+            />
+          </div>
+
+          {locationStatus && (
+            <div className="flex items-center gap-2 text-xs font-mono font-bold text-black/80">
+              <span className="w-2 h-2 rounded-full bg-fugo animate-pulse"></span>
+              <span>{locationStatus}</span>
+            </div>
+          )}
+
+          {formData.lat !== null && formData.lng !== null && (
+            <div className="flex items-center gap-4 text-[10px] font-mono font-black text-black/70 bg-white/70 p-2 border-2 border-black/20">
+              <span>LAT: {formData.lat.toFixed(5)}</span>
+              <span>LNG: {formData.lng.toFixed(5)}</span>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
@@ -3004,12 +3074,48 @@ function RepairDetails({
     } else {
       await updateOrderStatusInSupabase(request.id, updated.status, {
         price: updated.price,
+        total_amount: updated.total_amount,
         parts: updated.parts,
         estimated_timing: updated.estimatedTiming,
         repair_complexity: updated.repairComplexity,
         ...extraFields
       });
     }
+  };
+
+  // Final bill modal state for moving job to Ready
+  const [showReadyModal, setShowReadyModal] = useState(false);
+  const [finalBillInput, setFinalBillInput] = useState<string>('');
+  const [finalBillError, setFinalBillError] = useState<string | null>(null);
+
+  const itemizedTotal = (request.parts?.reduce((sum, p) => sum + (p.price || 0), 0) || 0) + (request.servicePrice || 0) + (request.repairPrice || 0);
+
+  const openReadyModal = () => {
+    const defaultVal = request.total_amount || request.price || (itemizedTotal > 0 ? itemizedTotal : '');
+    setFinalBillInput(defaultVal ? String(defaultVal) : '');
+    setFinalBillError(null);
+    setShowReadyModal(true);
+  };
+
+  const handleConfirmReady = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = finalBillInput.trim();
+    const num = Number(trimmed);
+    if (!trimmed || isNaN(num) || num <= 0) {
+      setFinalBillError('A valid final bill amount (₹) greater than 0 is required.');
+      return;
+    }
+
+    setShowReadyModal(false);
+    setFinalBillError(null);
+    await updateReq({
+      status: 'ready',
+      price: num,
+      total_amount: num
+    }, {
+      price: num,
+      total_amount: num
+    });
   };
 
   // Timer logic
@@ -3066,7 +3172,7 @@ function RepairDetails({
                   <span className="text-xs font-black uppercase tracking-widest opacity-60">ID: {request.id}</span>
                 </div>
 
-                <div className="flex gap-12 mt-8 py-8 border-t-4 border-black">
+                <div className="flex flex-wrap gap-12 mt-8 py-8 border-t-4 border-black">
                    <div>
                       <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Client Name</p>
                       <p className="text-2xl font-black uppercase italic">{request.customerName || 'Standard User'}</p>
@@ -3077,6 +3183,32 @@ function RepairDetails({
                         <p className="text-2xl font-black uppercase italic">{request.customerPhone}</p>
                      </div>
                    )}
+                   {(request.address || request.pickupAddress) && (
+                     <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Pickup Address</p>
+                        <p className="text-xl font-black uppercase italic">{request.address || request.pickupAddress}</p>
+                        {request.lat !== null && request.lat !== undefined && request.lng !== null && request.lng !== undefined && (
+                          <p className="text-xs font-mono font-bold text-black/70 mt-1">
+                            GPS: {Number(request.lat).toFixed(4)}, {Number(request.lng).toFixed(4)}
+                          </p>
+                        )}
+                     </div>
+                   )}
+                   <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Payment Status</p>
+                      <div className={cn(
+                        "mt-1 px-3 py-1.5 text-sm font-black uppercase tracking-wider inline-flex items-center gap-2 border-2",
+                        request.payment_status?.toUpperCase() === 'PAID'
+                          ? "bg-emerald-500 text-black border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                          : "bg-black text-amber-400 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                      )}>
+                        <span>
+                          {request.payment_status?.toUpperCase() === 'PAID'
+                            ? `Paid ₹${request.total_amount ?? request.price ?? 0} via ${request.payment_method || 'COD'}`
+                            : 'Unpaid'}
+                        </span>
+                      </div>
+                   </div>
                 </div>
 
                 {/* Show rich vehicle data if available */}
@@ -3112,7 +3244,7 @@ function RepairDetails({
                   </div>
                   <div className="flex justify-between border-b border-white/20 pb-2">
                     <span className="text-[10px] font-black uppercase tracking-widest opacity-50">Order Origin</span>
-                    <span className="text-sm font-black uppercase italic text-fugo">FUGO FUEL APP</span>
+                    <span className="text-sm font-black uppercase italic text-fugo">FUGO ORDER</span>
                   </div>
                   {request.estimatedTiming && (
                     <div className="flex justify-between border-b border-white/20 pb-2">
@@ -3343,6 +3475,35 @@ function RepairDetails({
                   </button>
                 )}
 
+                {/* Move to Ready Button with required Final bill (₹) prompt */}
+                {request.status !== 'ready' && request.status !== 'completed' && (
+                  <button 
+                    onClick={openReadyModal}
+                    className="w-full bg-green-500 text-black py-6 font-black uppercase text-2xl border-4 border-black hover:bg-green-400 transition-all shadow-[8px_8px_0px_0px_rgba(255,255,255,0.2)] flex items-center justify-center gap-3"
+                  >
+                    <CheckCircle className="w-8 h-8 text-black" />
+                    <span>Mark Ready (Set Bill)</span>
+                  </button>
+                )}
+
+                {request.status === 'ready' && (
+                  <div className="p-6 bg-green-950/60 border-4 border-green-500 space-y-3">
+                    <div className="flex items-center gap-2 text-green-400">
+                      <CheckCircle className="w-6 h-6" />
+                      <span className="text-sm font-black uppercase tracking-wider">Fix Confirmed & Ready</span>
+                    </div>
+                    <p className="text-xs text-white/80 font-bold leading-relaxed">
+                      Final bill to collect: <span className="text-green-400 font-mono text-base font-black">₹{request.total_amount || request.price || 0}</span>. Return trip has been registered for driver collection.
+                    </p>
+                    <button
+                      onClick={openReadyModal}
+                      className="w-full bg-green-500/20 text-green-300 border-2 border-green-500/60 py-2 text-xs font-black uppercase hover:bg-green-500 hover:text-black transition-colors"
+                    >
+                      Update Final Bill (₹)
+                    </button>
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs font-black uppercase tracking-widest text-fugo mb-4 block">State Override</label>
                   <select 
@@ -3350,7 +3511,11 @@ function RepairDetails({
                     value={request.status}
                     onChange={async (e) => {
                       const newStatus = e.target.value as Status;
-                      await updateReq({ status: newStatus });
+                      if (newStatus === 'ready') {
+                        openReadyModal();
+                      } else {
+                        await updateReq({ status: newStatus });
+                      }
                     }}
                   >
                     {steps.map(s => <option key={s} value={s} className="bg-fugo-dark text-white">{s}</option>)}
@@ -3666,6 +3831,81 @@ function RepairDetails({
           </div>
         </div>
       </div>
+
+      {/* Required Final Bill Modal when moving to Ready */}
+      {showReadyModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-fugo-dark border-8 border-fugo text-white max-w-lg w-full p-8 shadow-[16px_16px_0px_0px_rgba(0,0,0,1)]">
+            <div className="flex items-center gap-3 mb-4">
+              <CheckCircle className="w-8 h-8 text-fugo" />
+              <h3 className="text-3xl font-black uppercase tracking-tighter italic">Move to Ready</h3>
+            </div>
+            
+            <p className="text-xs uppercase font-bold text-white/70 mb-6 leading-relaxed">
+              Enter the required <span className="text-fugo font-black">Final bill (₹)</span>. This amount will be saved to both <span className="font-mono text-white">price</span> and <span className="font-mono text-white">total_amount</span> on the order. The driver collects this amount when the vehicle is returned.
+            </p>
+
+            <form onSubmit={handleConfirmReady} className="space-y-6">
+              <div>
+                <label className="text-xs font-black uppercase tracking-widest text-fugo block mb-2">
+                  Final bill (₹) <span className="text-red-400">* Required</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black text-fugo">₹</span>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    autoFocus
+                    placeholder="e.g. 3500"
+                    value={finalBillInput}
+                    onChange={(e) => {
+                      setFinalBillInput(e.target.value);
+                      if (finalBillError) setFinalBillError(null);
+                    }}
+                    className="w-full bg-black border-4 border-fugo text-white pl-12 pr-4 py-4 text-3xl font-black font-mono focus:outline-none focus:border-white"
+                  />
+                </div>
+                {itemizedTotal > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFinalBillInput(String(itemizedTotal));
+                      if (finalBillError) setFinalBillError(null);
+                    }}
+                    className="mt-2 text-xs font-black uppercase text-fugo hover:underline"
+                  >
+                    Use Itemized Total: ₹{itemizedTotal}
+                  </button>
+                )}
+                {finalBillError && (
+                  <p className="text-red-400 text-xs font-black uppercase mt-2">{finalBillError}</p>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4 pt-4 border-t-2 border-white/10">
+                <button
+                  type="submit"
+                  className="flex-1 bg-fugo text-black py-4 px-6 font-black uppercase text-xl border-4 border-black hover:bg-white transition-all shadow-[6px_6px_0px_0px_rgba(255,255,255,0.2)]"
+                >
+                  Confirm & Mark Ready
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReadyModal(false);
+                    setFinalBillError(null);
+                  }}
+                  className="bg-white/10 text-white py-4 px-6 font-black uppercase text-base hover:bg-white/20 transition-all border-2 border-white/20"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

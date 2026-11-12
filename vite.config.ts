@@ -137,8 +137,16 @@ export default defineConfig(({ mode }) => {
     envPrefix: ['VITE_', 'SUPABASE_'],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'arierwpjaksxxnmvbqwn'),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || 'ap-southeast-1'),
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(
+        (env.VITE_SUPABASE_URL?.startsWith('https://') && !env.VITE_SUPABASE_URL.includes('your-project-id'))
+          ? env.VITE_SUPABASE_URL
+          : 'https://arierwpjaksxxnmvbqwn.supabase.co'
+      ),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(
+        (env.VITE_SUPABASE_ANON_KEY?.startsWith('sb_publishable_') || env.VITE_SUPABASE_ANON_KEY?.startsWith('eyJ') || env.VITE_SUPABASE_ANON_KEY?.startsWith('sb_secret_'))
+          ? env.VITE_SUPABASE_ANON_KEY
+          : 'sb_publishable__c-Q3k0ibuQMt3_mtYpRNw_Se-8kFbS'
+      ),
     },
     resolve: {
       alias: {
